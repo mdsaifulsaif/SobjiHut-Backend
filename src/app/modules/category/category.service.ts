@@ -3,18 +3,6 @@ import { Category } from "./category.model";
 import { Product } from "../product/product.model";
 import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
 
-// const createCategoryIntoDB = async (payload: ICategory) => {
-//   const isExist = await Category.findOne({
-//     name: payload.name,
-//     isDeleted: false,
-//   });
-
-//   if (isExist) {
-//     throw new Error("Category already exists!");
-//   }
-
-//   return await Category.create(payload);
-// };
 
 const createCategoryIntoDB = async (payload: any, file: any) => {
   // Partial<ICategory> এর বদলে temporary any দিন টেস্টের জন্য

@@ -7,8 +7,8 @@ const router = Router();
 
 router.post(
   "/create-category",
-  isAuthenticated,
-  isAdmin,
+  // isAuthenticated,
+  // isAdmin,
   upload.single("image"),
   CategoryControllers.createCategory,
 );
