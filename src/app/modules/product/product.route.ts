@@ -7,8 +7,8 @@ const router = Router();
 
 router.post(
   "/create-product",
-  isAuthenticated,
-  isAdmin,
+  // isAuthenticated,
+  // isAdmin,
   upload.fields([
     { name: "thumbnail", maxCount: 1 },
     { name: "images", maxCount: 5 },

@@ -9,127 +9,9 @@ import { deleteFromCloudinary } from "../../utils/deleteFromCloudinary";
 
 
 const createProduct = catchAsync(async (req: Request, res: Response) => {
-  const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+  // বডি এবং ফাইল সরাসরি সার্ভিসে পাঠানো হচ্ছে
+  const result = await ProductServices.createProductIntoDB(req.body, req.files);
 
-  const { name, shortDescription, description, costPrice, regularPrice, categoryID, stock } =
-    req.body;
-
-    console.log(req.body)
-
-  //  1. Required field check
-  if (
-    !name ||
-    !shortDescription ||
-    !costPrice ||
-    !regularPrice ||
-    !categoryID ||
-    stock === undefined
-  ) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Please provide all required fields: name, shortDescription, costPrice, regularPrice, categoryID, and stock.",
-    });
-  }
-
-  //  2. Number validation
-  const cost = Number(costPrice);
-  const regular = Number(regularPrice);
-  const qty = Number(stock);
-  const sale = req.body.salePrice ? Number(req.body.salePrice) : undefined;
-
-  if (cost <= 0 || regular <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: "Prices must be greater than zero.",
-    });
-  }
-
-  if (sale && sale >= regular) {
-    return res.status(400).json({
-      success: false,
-      message: "Sale price must be less than regular price.",
-    });
-  }
-
-  //  3. Parse JSON fields safely
-  let tags: string[] = [];
-  let lowdown: string[] = [];
-
-  try {
-    if (req.body.tags) tags = JSON.parse(req.body.tags);
-    if (req.body.lowdown) lowdown = JSON.parse(req.body.lowdown);
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid JSON format for tags or lowdown.",
-    });
-  }
-
-  //  4. Build clean payload (ONLY allowed fields)
-  let productData: any = {
-    name,
-    shortDescription,
-    description,
-    categoryID,
-
-    costPrice: cost,
-    regularPrice: regular,
-    salePrice: sale,
-
-    stock: qty,
-
-    brand: req.body.brand || undefined,
-    tags,
-    lowdown,
-
-    weight: req.body.weight ? Number(req.body.weight) : undefined,
-    freeShipping: req.body.freeShipping === "true",
-
-    isFeatured: req.body.isFeatured === "true",
-    isNew: req.body.isNew !== "false",
-
-    status: req.body.status || "active",
-
-    metaTitle: req.body.metaTitle,
-    metaDescription: req.body.metaDescription,
-
-    // dimensions parse
-    dimensions: {
-      length: req.body.length ? Number(req.body.length) : undefined,
-      width: req.body.width ? Number(req.body.width) : undefined,
-      height: req.body.height ? Number(req.body.height) : undefined,
-    },
-  };
-
-  //  5. Thumbnail upload (unchanged as you wanted)
-  if (files && files.thumbnail && files.thumbnail[0]) {
-    const result: any = await uploadToCloudinary(
-      files.thumbnail[0].buffer,
-      "glowly_products/thumbnails",
-    );
-    productData.thumbnail = result.secure_url || result.url;
-  } else {
-    return res.status(400).json({
-      success: false,
-      message: "Product thumbnail is required!",
-    });
-  }
-
-  //  6. Multiple images upload
-  if (files && files.images && files.images.length > 0) {
-    const uploadPromises = files.images.map((file) =>
-      uploadToCloudinary(file.buffer, "glowly_products/gallery"),
-    );
-
-    const uploadResults: any[] = await Promise.all(uploadPromises);
-    productData.images = uploadResults.map((res) => res.secure_url || res.url);
-  }
-
-  //  7. Call service
-  const result = await ProductServices.createProductIntoDB(productData);
-
-  //  8. Response
   sendResponse(res, {
     statusCode: 201,
     success: true,
@@ -137,6 +19,8 @@ const createProduct = catchAsync(async (req: Request, res: Response) => {
     data: result,
   });
 });
+
+
 
 const updateProduct = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params;

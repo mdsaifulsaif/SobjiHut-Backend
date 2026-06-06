@@ -1,92 +1,151 @@
-
-
-
-
-import { Schema, model } from "mongoose";
+import mongoose, { Schema, model } from "mongoose";
 import { IProduct } from "./product.interface";
 
 const productSchema = new Schema<IProduct>(
   {
-    //  Basic Info (OLD KEEP)
     name: { type: String, required: true, trim: true },
-    shortDescription: { type: String, required: true },
+    shortDescription: { type: String, required: true, trim: true },
     description: { type: String, required: true },
+    slug: { type: String, unique: true, sparse: true, trim: true },
 
-    //  slug (auto)
-    slug: { type: String, unique: true },
-
-    //  Pricing (OLD KEEP)
-    costPrice: { type: Number, required: true },
-    regularPrice: { type: Number, required: true },
-    salePrice: { type: Number },
-
-    //  Discount
-    discountPercent: { type: Number, default: 0 },
-
-    //  Inventory (OLD KEEP)
-    stock: { type: Number, required: true, default: 0 },
-
-    //  SKU + Alert
-    sku: { type: String, unique: true, sparse: true },
-    lowStockAlert: { type: Number, default: 10 },
-
-    //  Media (OLD KEEP)
-    thumbnail: { type: String, required: true },
-    images: [{ type: String }],
-
-    //  Category (OLD KEEP)
+    brandID: {
+      type: mongoose.Schema.Types.Mixed,
+      ref: "Brand",
+      default: "nonebrand",
+    },
     categoryID: {
       type: Schema.Types.ObjectId,
       ref: "Category",
       required: true,
     },
+    tags: [{ type: String, trim: true }],
 
-    //  Branding
-    brand: { type: String },
-    tags: [{ type: String }],
+    costPrice: { type: Number, required: true, min: 0 },
+    regularPrice: { type: Number, required: true, min: 0 },
+    salePrice: { type: Number, min: 0 },
+    discountPercent: { type: Number, default: 0, min: 0, max: 100 },
+    stock: { type: Number, required: true, default: 0, min: 0 },
+    sku: { type: String, unique: true, sparse: true, trim: true },
+    lowStockAlert: { type: Number, default: 10, min: 0 },
 
-    //  Reviews
-    rating: { type: Number, default: 0 },
-    numReviews: { type: Number, default: 0 },
+    productType: {
+      type: String,
+      enum: ["single", "combo"],
+      default: "single",
+    },
+    unit: {
+      type: Schema.Types.ObjectId,
+      ref: "Unit", // 👈 আপনার তৈরি করা Unit কালেকশনকে রেফার করছে
+      required: true,
+    },
+    variants: {
+      type: [
+        {
+          variantName: { type: String, required: true, trim: true },
+          weightOrVolume: { type: Number, required: true, min: 0 },
+          regularPrice: { type: Number, required: true, min: 0 },
+          salePrice: { type: Number, min: 0 },
+          stock: { type: Number, required: true, default: 0, min: 0 },
+          sku: { type: String, trim: true },
+        },
+      ],
+      default: [],
+    },
 
-    //  Status
+    comboItems: {
+      type: [
+        {
+          productID: {
+            type: Schema.Types.ObjectId,
+            ref: "Product",
+            required: true,
+          },
+          quantity: { type: Number, default: 1, min: 1 },
+        },
+      ],
+      default: [],
+    },
+
+    specifications: [
+      {
+        key: { type: String, required: true, trim: true },
+        value: { type: String, required: true, trim: true },
+      },
+    ],
+
+    thumbnail: { type: String, required: true, trim: true },
+    images: [{ type: String, trim: true }],
+
     status: {
       type: String,
       enum: ["active", "inactive", "draft"],
       default: "active",
     },
-
-    // ⚡ Flags (OLD KEEP)
     isFeatured: { type: Boolean, default: false },
+    isOnSale: { type: Boolean, default: false },
     isNew: { type: Boolean, default: true },
 
-    //  Shipping
-    weight: { type: Number },
+    freeShipping: { type: Boolean, default: false },
+    shippingCost: { type: Number, default: 0, min: 0 },
+    weight: { type: Number, min: 0 },
     shippingClass: {
       type: String,
       enum: ["normal", "fragile", "heavy"],
       default: "normal",
     },
-    freeShipping: { type: Boolean, default: false },
-
-    //  Dimensions
     dimensions: {
-      length: Number,
-      width: Number,
-      height: Number,
+      length: { type: Number },
+      width: { type: Number },
+      height: { type: Number },
     },
 
-    //  SEO
-    metaTitle: { type: String },
-    metaDescription: { type: String },
+    metaTitle: { type: String, trim: true, default: "" },
+    metaDescription: { type: String, trim: true, default: "" },
 
-    //  Internal (OLD KEEP)
-    straight_up: { type: String },
-    lowdown: [{ type: String }],
+    rating: { type: Number, default: 0, min: 0, max: 5 },
+    numReviews: { type: Number, default: 0, min: 0 },
+
+    straight_up: { type: String, trim: true },
+    lowdown: [{ type: String, trim: true }],
   },
   {
     timestamps: true,
-  }
+  },
 );
+
+// 🔥 ডাটাবেজে সেভ হওয়ার আগের অটোমেশন লজিক
+productSchema.pre("save", async function () {
+  // ১. স্লাগ অটো-জেনারেশন
+  if (!this.slug && this.name) {
+    this.slug = this.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "");
+  }
+
+  // ২. মেইন ডিসকাউন্ট পার্সেন্টেজ অটো ক্যালকুলেশন
+  if (this.regularPrice && this.salePrice) {
+    this.discountPercent = Math.round(
+      ((this.regularPrice - this.salePrice) / this.regularPrice) * 100,
+    );
+  } else {
+    this.discountPercent = 0;
+  }
+
+  // ৩. ভেরিয়েন্ট প্রোডাক্টের ক্ষেত্রে টোটাল স্টক এবং বেস প্রাইস সিঙ্ক
+  if (this.variants && this.variants.length > 0) {
+    this.stock = this.variants.reduce(
+      (total, variant) => total + variant.stock,
+      0,
+    );
+
+    if (this.variants[0].regularPrice) {
+      this.regularPrice = this.variants[0].regularPrice;
+    }
+    if (this.variants[0].salePrice) {
+      this.salePrice = this.variants[0].salePrice;
+    }
+  }
+});
 
 export const Product = model<IProduct>("Product", productSchema);
