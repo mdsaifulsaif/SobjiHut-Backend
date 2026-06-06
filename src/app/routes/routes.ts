@@ -11,6 +11,7 @@ import { DashboardRoutes } from "../modules/dashboard/dashboard.route";
 import path from "node:path";
 import { PaymentRoutes } from "../modules/payment/payment.routes";
 import { ContactRoutes } from "../modules/email/email.route";
+import { UnitRoutes } from "../modules/unit/unit.route";
 
 const router = Router();
 
@@ -59,8 +60,12 @@ const moduleRoutes = [
     path: '/contact', 
     route: ContactRoutes,
   },
+  {
+    path: '/unit', 
+    route: UnitRoutes,
+  },
 ];
-// 
+
 moduleRoutes.forEach((route) => router.use(route.path, route.route));
 
 export default router;

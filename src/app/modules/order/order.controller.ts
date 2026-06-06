@@ -3,18 +3,6 @@ import catchAsync from "../../utils/catchAsync";
 import sendResponse from "../../utils/sendResponse";
 import { OrderServices } from "./order.service";
 
-// const createOrder = catchAsync(async (req: Request, res: Response) => {
-//   const userId = (req as any).user?._id;
-//   const result = await OrderServices.createOrderIntoDB({ ...req.body, user: userId });
-
-//   sendResponse(res, {
-//     statusCode: 201,
-//     success: true,
-//     message: "Order placed successfully!",
-//     data: result,
-//   });
-// });
-
 const createOrder = catchAsync(async (req: Request, res: Response) => {
   const userId = (req as any).user?._id;
  
