@@ -28,6 +28,16 @@ const getAllUnits = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getSingleUnit = catchAsync(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const result = await UnitServices.getSingleUnitFromDB(id as string);
+  res.status(200).json({
+    success: true,
+    message: "Unit retrieved successfully!",
+    data: result,
+  });
+});
+
 // ৩. ইউনিট আপডেট করা
 const updateUnit = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -44,5 +54,6 @@ const updateUnit = catchAsync(async (req: Request, res: Response) => {
 export const UnitControllers = {
   createUnit,
   getAllUnits,
+  getSingleUnit,
   updateUnit,
 };

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { IUnit } from './unit.interface';
 import { Unit } from './unit.model';
 
@@ -46,6 +47,17 @@ const getAllUnitsFromDB = async (query: Record<string, any>) => {
   };
 };
 
+const getSingleUnitFromDB = async (id: string) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error("ইনভ্যালিড আইডি ফরম্যাট!");
+  }
+  const result = await Unit.findById(id);
+  if (!result || result.isDeleted) {
+    throw new Error("ইউনিটটি খুঁজে পাওয়া যায়নি!");
+  }
+  return result;
+};
+
 // ৩. ইউনিট আপডেট করা
 const updateUnitInDB = async (id: string, payload: Partial<IUnit>) => {
   const result = await Unit.findByIdAndUpdate(id, payload, {
@@ -58,5 +70,6 @@ const updateUnitInDB = async (id: string, payload: Partial<IUnit>) => {
 export const UnitServices = {
   createUnitIntoDB,
   getAllUnitsFromDB,
+  getSingleUnitFromDB,
   updateUnitInDB,
 };
