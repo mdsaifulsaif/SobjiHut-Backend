@@ -184,11 +184,12 @@ export const updateProfile = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-interface AuthRequest extends Request {
-  user?: IUser;
-}
+// interface AuthRequest extends Request {
+//   user?: IUser;
+// }
 
-const getMe = catchAsync(async (req: AuthRequest, res: Response) => {
+// const getMe = catchAsync(async (req: AuthRequest, res: Response) => {
+const getMe = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?._id;
 
   if (!userId) {

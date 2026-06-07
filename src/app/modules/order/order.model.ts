@@ -112,6 +112,7 @@ const orderSchema = new Schema<IOrder>(
 
     cancelReason: { type: String },
     cancelledBy: { type: String, enum: ["user", "admin"] },
+    pendingExpiresAt: { type: Date },
   },
   { timestamps: true },
 );

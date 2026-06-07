@@ -7,7 +7,7 @@ import { ProductRoutes } from "../modules/product/product.route";
 import { OrderRoutes } from "../modules/order/order.route";
 import { SettingRoutes } from "../modules/settings/setting.route";
 import { CustomerRoutes } from "../modules/customer/customer.route";
-import { DashboardRoutes } from "../modules/dashboard/dashboard.route";
+
 import path from "node:path";
 import { PaymentRoutes } from "../modules/payment/payment.routes";
 import { ContactRoutes } from "../modules/email/email.route";
@@ -49,24 +49,21 @@ const moduleRoutes = [
     path: "/customers",
     route: CustomerRoutes,
   },
-  {
-    path: "/dashboard",
-    route: DashboardRoutes,
-  },
+
   {
     path: "/payment",
     route: PaymentRoutes,
   },
   {
-    path: '/contact', 
+    path: "/contact",
     route: ContactRoutes,
   },
   {
-    path: '/unit', 
+    path: "/unit",
     route: UnitRoutes,
   },
   {
-    path: '/brands', 
+    path: "/brands",
     route: BrandRoutes,
   },
 ];

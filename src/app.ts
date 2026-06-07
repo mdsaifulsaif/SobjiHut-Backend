@@ -3,6 +3,9 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import router from "./app/routes/routes";
 import globalErrorHandler from "./app/middlewares/globalErrorHandler";
+import { startOrderExpiryJob } from "./app/modules/order/order.cron";
+// import { startOrderExpiryJob } from "./modules/order/order.cron";
+startOrderExpiryJob();
 
 const app: Application = express();
 

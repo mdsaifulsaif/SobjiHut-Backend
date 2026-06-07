@@ -42,6 +42,8 @@ export interface IProduct {
   salePrice?: number;
   discountPercent?: number;
   stock: number;
+  reservedStock?: number;
+  availableStock?: number; // virtual
   sku?: string;
   lowStockAlert?: number;
   thumbnail: string;

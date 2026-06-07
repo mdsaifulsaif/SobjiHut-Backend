@@ -24,7 +24,9 @@ const productSchema = new Schema<IProduct>(
     regularPrice: { type: Number, required: true, min: 0 },
     salePrice: { type: Number, min: 0 },
     discountPercent: { type: Number, default: 0, min: 0, max: 100 },
+    // stock: { type: Number, required: true, default: 0, min: 0 },
     stock: { type: Number, required: true, default: 0, min: 0 },
+    reservedStock: { type: Number, default: 0, min: 0 }, // 👈 এটা add করো
     sku: { type: String, unique: true, sparse: true, trim: true },
     lowStockAlert: { type: Number, default: 10, min: 0 },
 
@@ -112,6 +114,10 @@ const productSchema = new Schema<IProduct>(
     timestamps: true,
   },
 );
+
+productSchema.virtual("availableStock").get(function () {
+  return this.stock - (this.reservedStock || 0);
+});
 
 //  ডাটাবেজে সেভ হওয়ার আগের অটোমেশন লজিক
 productSchema.pre("save", async function () {

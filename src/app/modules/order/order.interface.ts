@@ -74,6 +74,8 @@ export interface IOrder {
   shippingCharge: number;
   totalAmount: number;
 
+  pendingExpiresAt?: Date;
+
   // ডেলিভারি
   deliveryType: DeliveryType; // local বা nationwide
   deliveryAddress: IDeliveryAddress;
