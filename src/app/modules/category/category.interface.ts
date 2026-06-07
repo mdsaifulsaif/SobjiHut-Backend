@@ -10,6 +10,7 @@ export interface ICategory {
   banner?: string;
   status?: "active" | "inactive";
   order?: number | string;
+  imagePublicId?: string;
   isFeatured?: boolean;
   showInHome?: boolean;
   showInMenu?: boolean;

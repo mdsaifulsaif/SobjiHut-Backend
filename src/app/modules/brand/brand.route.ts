@@ -19,14 +19,15 @@ router.post(
 router.get("/", BrandControllers.getAllBrands);
 
 
-router.put(
+router.patch(
   "/:id", 
-  isAuthenticated, 
-  isAdmin, 
+  // isAuthenticated, 
+  // isAdmin, 
   upload.single("logo"), 
   BrandControllers.updateBrand
 );
 
+router.get('/:id', BrandControllers.getSingleBrand)
 
 router.delete(
   "/:id", 

@@ -53,6 +53,23 @@ const updateBrand = async (req: Request, res: Response) => {
   }
 };
 
+const getSingleBrand = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await BrandServices.getSingleBrandFromDB(id as string);
+    
+    res.status(200).json({
+      success: true,
+      message: "Brand retrieved successfully!",
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(404).json({ success: false, message: error.message });
+  }
+};
+
+
+
 // ব্র্যান্ড ডিলিট করা
 const deleteBrand = async (req: Request, res: Response) => {
   try {
@@ -69,5 +86,6 @@ export const BrandControllers = {
   createBrand,
   getAllBrands,
   updateBrand,
+  getSingleBrand,
   deleteBrand,
 };
