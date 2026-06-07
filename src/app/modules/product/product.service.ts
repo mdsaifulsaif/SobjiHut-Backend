@@ -3,106 +3,7 @@ import { Product } from "./product.model";
 import { Order } from "../order/order.model";
 import slugify from "slugify";
 import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
-
-// const createProductIntoDB = async (body: Record<string, any>, files: any) => {
-//   const { name, shortDescription, description, costPrice, regularPrice, categoryID, stock, unit, productType } = body;
-
-//   // ১. রিকোয়ার্ড ফিল্ড ভ্যালিডেশন
-//   if (!name || !shortDescription || !costPrice || !regularPrice || !categoryID || stock === undefined || !unit) {
-//     throw new Error("Please provide all required fields: name, shortDescription, costPrice, regularPrice, categoryID, stock, and unit.");
-//   }
-
-//   const cost = Number(costPrice);
-//   const regular = Number(regularPrice);
-//   const qty = Number(stock);
-//   const sale = body.salePrice ? Number(body.salePrice) : undefined;
-
-//   if (cost <= 0 || regular <= 0) {
-//     throw new Error("Prices must be greater than zero.");
-//   }
-//   if (sale && sale >= regular) {
-//     throw new Error("Sale price must be less than regular price.");
-//   }
-
-//   // ২. JSON অ্যারে ও অবজেক্ট সেফ পার্সিং
-//   let tags: string[] = [];
-//   let lowdown: string[] = [];
-//   let variants: any[] = [];
-//   let comboItems: any[] = [];
-//   let specifications: any[] = [];
-
-//   try {
-//     if (body.tags) tags = JSON.parse(body.tags);
-//     if (body.lowdown) lowdown = JSON.parse(body.lowdown);
-//     if (body.variants) variants = JSON.parse(body.variants);
-//     if (body.comboItems) comboItems = JSON.parse(body.comboItems);
-//     if (body.specifications) specifications = JSON.parse(body.specifications);
-//   } catch (error) {
-//     throw new Error("Invalid JSON format for array or object fields.");
-//   }
-
-//   // ৩. ডাইমেনশন অবজেক্ট ফিক্স (টাইপস্ক্রিপ্ট সেফ)
-//   const dimensions = body.length || body.width || body.height ? {
-//     length: body.length ? Number(body.length) : undefined,
-//     width: body.width ? Number(body.width) : undefined,
-//     height: body.height ? Number(body.height) : undefined,
-//   } : undefined;
-
-//   // ৪. পেলোড অবজেক্ট তৈরি
-//   const productData: Partial<IProduct> = {
-//     name,
-//     shortDescription,
-//     description,
-//     categoryID,
-//     unit, // 👈 ইউনিট আইডি এখানে পারফেক্টলি অ্যাসাইন হচ্ছে
-//     productType: productType || "single",
-//     costPrice: cost,
-//     regularPrice: regular,
-//     salePrice: sale,
-//     stock: qty,
-//     sku: body.sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-//     lowStockAlert: body.lowStockAlert ? Number(body.lowStockAlert) : 10,
-//     brand: body.brand || "",
-//     tags,
-//     lowdown,
-//     variants,
-//     comboItems,
-//     specifications,
-//     weight: body.weight ? Number(body.weight) : undefined,
-//     shippingCost: body.shippingCost ? Number(body.shippingCost) : 0,
-//     freeShipping: body.freeShipping === "true",
-//     isFeatured: body.isFeatured === "true",
-//     isOnSale: body.isOnSale === "true",
-//     isNew: body.isNew !== "false",
-//     status: body.status || "active",
-//     metaTitle: body.metaTitle || "",
-//     metaDescription: body.metaDescription || "",
-//     dimensions,
-//   };
-
-//   // ৫. থাম্বনেইল ইমেজ আপলোড
-//   const thumbnailFiles = files?.thumbnail;
-//   if (thumbnailFiles && thumbnailFiles[0]) {
-//     const result: any = await uploadToCloudinary(thumbnailFiles[0].buffer, "glowly_products/thumbnails");
-//     productData.thumbnail = result.secure_url || result.url;
-//   } else {
-//     throw new Error("Product thumbnail is required!");
-//   }
-
-//   // ৬. গ্যালারি মাল্টিপল ইমেজ আপলোড
-//   const galleryFiles = files?.images;
-//   if (galleryFiles && galleryFiles.length > 0) {
-//     const uploadPromises = galleryFiles.map((file: any) =>
-//       uploadToCloudinary(file.buffer, "glowly_products/gallery")
-//     );
-//     const uploadResults: any[] = await Promise.all(uploadPromises);
-//     productData.images = uploadResults.map((res) => res.secure_url || res.url);
-//   }
-
-//   // ৭. ডেটাবেজে ক্রিয়েট
-//   const result = await Product.create(productData);
-//   return result;
-// };
+import { PipelineStage } from "mongoose";
 
 const createProductIntoDB = async (body: Record<string, any>, files: any) => {
   const {
@@ -297,30 +198,59 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
   return result;
 };
 
-const updateProductIntoDB = async (id: string, payload: Partial<IProduct>) => {
+const updateProductIntoDB = async (id: string, payload: any) => {
   const product = await Product.findById(id);
 
   if (!product) {
     throw new Error("Product not found");
   }
 
-  // 🔥 salePrice validation
-  if (
-    payload.salePrice &&
-    payload.regularPrice &&
-    payload.salePrice >= payload.regularPrice
-  ) {
+  // ১. JSON ফিল্ডগুলো পার্স করা (FormData থেকে স্ট্রিং হিসেবে আসলে)
+  const jsonFields = ['specifications', 'variants', 'comboItems', 'tags', 'lowdown'];
+  for (const field of jsonFields) {
+    if (payload[field] && typeof payload[field] === 'string') {
+      try {
+        payload[field] = JSON.parse(payload[field]);
+      } catch (err) {
+        throw new Error(`Invalid JSON format for field: ${field}`);
+      }
+    }
+  }
+
+  // ২. নাম্বার ফিল্ডগুলোকে নিরাপদ করা (NaN এরর রোধ করতে)
+  const numericFields = ['weight', 'salePrice', 'regularPrice', 'costPrice', 'stock', 'shippingCost', 'lowStockAlert'];
+  
+  numericFields.forEach(field => {
+    if (payload[field] !== undefined && payload[field] !== null && payload[field] !== '') {
+      const parsedValue = Number(payload[field]);
+      if (isNaN(parsedValue)) {
+        throw new Error(`${field} must be a valid number`);
+      }
+      payload[field] = parsedValue;
+    } else if (payload[field] === '') {
+      // যদি খালি স্ট্রিং পাঠানো হয় তবে সেটি ডিলিট করে দিন
+      delete payload[field];
+    }
+  });
+
+  // ৩. ডাইমেনশন অবজেক্ট হ্যান্ডেল করা
+  if (payload.dimensions && typeof payload.dimensions === 'string') {
+    payload.dimensions = JSON.parse(payload.dimensions);
+  }
+
+  // ৪. লজিক্যাল ভ্যালিডেশন
+  if (payload.salePrice && payload.regularPrice && payload.salePrice >= payload.regularPrice) {
     throw new Error("Sale price must be less than regular price");
   }
 
-  // 🔥 discount auto calculate
-  if (payload.salePrice) {
+  // ৫. ডিসকাউন্ট অটো ক্যালকুলেশন
+  if (payload.regularPrice && payload.salePrice) {
     payload.discountPercent = Math.round(
-      ((payload.regularPrice! - payload.salePrice) / payload.regularPrice!) *
-        100,
+      ((payload.regularPrice - payload.salePrice) / payload.regularPrice) * 100
     );
   }
 
+  // ৬. আপডেট অপারেশন
   const updated = await Product.findByIdAndUpdate(id, payload, {
     new: true,
     runValidators: true,
@@ -349,60 +279,67 @@ export const getNewProductsService = async (params: GetProductsParams) => {
 };
 
 const getAllProductsFromDB = async (query: Record<string, any>) => {
-  const {
-    searchTerm,
-    category,
-    tag,
-    page = 1,
-    limit = 8,
-    sort,
-    ...filterData
+  const { 
+    searchTerm, category, productType, status, isFeatured, 
+    page = 1, limit = 8, sort = "-createdAt" 
   } = query;
 
-  const filter: any = { ...filterData };
+  const pageNum = Number(page);
+  const limitNum = Number(limit);
 
-  // 1. serch logic
+  const matchStage: any = {};
   if (searchTerm) {
-    filter.$or = [
+    matchStage.$or = [
       { name: { $regex: searchTerm, $options: "i" } },
       { description: { $regex: searchTerm, $options: "i" } },
-      { tags: { $regex: searchTerm, $options: "i" } },
     ];
   }
+  if (category) matchStage.categoryID = category;
+  if (productType) matchStage.productType = productType;
+  if (status) matchStage.status = status;
+  if (isFeatured !== undefined) matchStage.isFeatured = isFeatured === 'true';
 
-  // 2. category filter
-  if (category && category !== "All Product") {
-    filter.categoryID = category;
-  }
+  // সমাধান: Facet এর ভেতরের স্টেজগুলোকে 'any' হিসেবে চিহ্নিত করা যাতে টাইপ এরর না আসে
+  const pipeline: PipelineStage[] = [
+    { $match: matchStage },
+    {
+      $facet: {
+        data: [
+          { $sort: { [sort.replace("-", "")]: sort.startsWith("-") ? -1 : 1 } },
+          { $skip: (pageNum - 1) * limitNum },
+          { $limit: limitNum },
+          { $lookup: { from: "categories", localField: "categoryID", foreignField: "_id", as: "categoryID" } },
+          { $unwind: { path: "$categoryID", preserveNullAndEmptyArrays: true } }
+        ] as any, // 👈 এখানে 'as any' ব্যবহার করলে এরর চলে যাবে
+        metaCounts: [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              active: { $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] } },
+              inactive: { $sum: { $cond: [{ $eq: ["$status", "inactive"] }, 1, 0] } },
+              lowStock: { $sum: { $cond: [{ $lte: ["$stock", "$lowStockAlert"] }, 1, 0] } },
+              featured: { $sum: { $cond: ["$isFeatured", 1, 0] } }
+            }
+          }
+        ] as any // 👈 এখানে 'as any' ব্যবহার করুন
+      }
+    }
+  ];
 
-  // 3. tag filter
-  if (tag) {
-    filter.tags = { $in: [tag] };
-  }
-
-  // 4. sorting
-  let sortStr = "-createdAt";
-  if (sort) {
-    sortStr = sort as string;
-  }
-
-  // 5. paganation
-  const skip = (Number(page) - 1) * Number(limit);
-
-  // data fetch
-  const result = await Product.find(filter)
-    .populate("categoryID")
-    .sort(sortStr)
-    .skip(skip)
-    .limit(Number(limit));
-
-  // meta data calcualation
-  const total = await Product.countDocuments(filter);
-  const totalPage = Math.ceil(total / Number(limit));
+  const result = await Product.aggregate(pipeline);
+  const facetData = result[0];
+  const total = facetData.metaCounts[0]?.total || 0;
 
   return {
-    meta: { page: Number(page), limit: Number(limit), total, totalPage },
-    data: result,
+    meta: {
+      page: pageNum,
+      limit: limitNum,
+      total: total,
+      totalPage: Math.ceil(total / limitNum),
+      counts: facetData.metaCounts[0] || { total: 0, active: 0, inactive: 0, lowStock: 0, featured: 0 }
+    },
+    data: facetData.data,
   };
 };
 

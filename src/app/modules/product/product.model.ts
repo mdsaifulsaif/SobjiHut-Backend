@@ -113,7 +113,7 @@ const productSchema = new Schema<IProduct>(
   },
 );
 
-// 🔥 ডাটাবেজে সেভ হওয়ার আগের অটোমেশন লজিক
+//  ডাটাবেজে সেভ হওয়ার আগের অটোমেশন লজিক
 productSchema.pre("save", async function () {
   // ১. স্লাগ অটো-জেনারেশন
   if (!this.slug && this.name) {

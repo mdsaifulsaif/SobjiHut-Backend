@@ -108,6 +108,8 @@ const getAllProducts = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+
+
 export const getProductsController = async (req: Request, res: Response) => {
   try {
     const products = await getNewProductsService({

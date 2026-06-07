@@ -18,8 +18,8 @@ router.post(
 
 router.patch(
   "/:id",
-  isAuthenticated,
-  isAdmin,
+  // isAuthenticated,
+  // isAdmin,
   upload.fields([
     { name: "thumbnail", maxCount: 1 },
     { name: "images", maxCount: 5 },
