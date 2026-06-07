@@ -1,15 +1,12 @@
+// order.controller.ts
 import { Request, Response } from "express";
 import catchAsync from "../../utils/catchAsync";
 import sendResponse from "../../utils/sendResponse";
 import { OrderServices } from "./order.service";
 
 const createOrder = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?._id;
- 
-  const result = await OrderServices.createOrderIntoDB({
-    ...req.body,
-    user: userId,
-  });
+  const userID = req.user._id as string;
+  const result = await OrderServices.createOrderIntoDB(userID, req.body);
 
   sendResponse(res, {
     statusCode: 201,
@@ -20,160 +17,84 @@ const createOrder = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getMyOrders = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?._id;
-  const result = await OrderServices.getMyOrdersFromDB(userId);
+  const userID = req.user._id as string;
+  const result = await OrderServices.getMyOrdersFromDB(userID, req.query);
 
   sendResponse(res, {
     statusCode: 200,
     success: true,
-    message: "Orders retrieved successfully!",
-    data: result,
-  });
-});
-
-// const updateOrderStatus = catchAsync(async (req: Request, res: Response) => {
-//   const { orderId } = req.params;
-//   const { status } = req.body;
-//   const result = await OrderServices.updateOrderStatusInDB(orderId as string, status);
-
-//   sendResponse(res, {
-//     statusCode: 200,
-//     success: true,
-//     message: `Order marked as ${status}`,
-//     data: result,
-//   });
-// });
-
-const updateOrderStatus = catchAsync(async (req: Request, res: Response) => {
-  const { orderId } = req.params;
-  const { status } = req.body;
-
-  const result = await OrderServices.updateOrderStatusInDB(
-    orderId as string,
-    status,
-  );
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: `Order marked as ${status}`,
+    message: "Orders fetched successfully!",
     data: result,
   });
 });
 
 const getSingleOrder = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?._id;
-  const { orderId } = req.params;
-  const result = await OrderServices.getSingleOrderFromDB(
-    orderId as string,
-    userId,
+  const userID = req.user._id as string;
+  const { id } = req.params as { id: string };
+
+  const result = await OrderServices.getSingleOrderFromDB(id, userID);
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Order fetched successfully!",
+    data: result,
+  });
+});
+
+const cancelOrder = catchAsync(async (req: Request, res: Response) => {
+  const userID = req.user._id as string;
+  const { id } = req.params as { id: string };
+
+  const result = await OrderServices.cancelOrderByUser(
+    id,
+    userID,
+    req.body.reason as string,
   );
 
   sendResponse(res, {
     statusCode: 200,
     success: true,
-    message: "Order details retrieved successfully!",
+    message: "Order cancelled successfully!",
     data: result,
   });
 });
 
 const getAllOrders = catchAsync(async (req: Request, res: Response) => {
-  const { page, limit, search } = req.query;
-
-  const result = await OrderServices.getAllOrdersFromDB(
-    Number(page) || 1,
-    Number(limit) || 10,
-    search as string,
-  );
+  const result = await OrderServices.getAllOrdersFromDB(req.query);
 
   sendResponse(res, {
     statusCode: 200,
     success: true,
-    message: "All orders retrieved successfully!",
-    meta: {
-      page: result.pagination.currentPage,
-      limit: Number(limit) || 10,
-      total: result.pagination.totalOrders,
-      totalPage: result.pagination.totalPages,
-    },
-    data: {
-      orders: result.orders,
-      stats: result.stats,
-    },
-  });
-});
-
-const getAdminSingleOrder = catchAsync(async (req: Request, res: Response) => {
-  const { orderId } = req.params;
-  const result = await OrderServices.getAdminSingleOrderFromDB(
-    orderId as string,
-  );
-
-  if (!result) {
-    return sendResponse(res, {
-      statusCode: 404,
-      success: false,
-      message: "Order not found!",
-      data: null,
-    });
-  }
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: "Order details fetched for admin successfully!",
+    message: "All orders fetched!",
     data: result,
   });
 });
 
-export const getDashboardStats = async (req: Request, res: Response) => {
-  try {
-    const result = await OrderServices.getDashboardStatsFromDB();
+const updateOrderStatus = catchAsync(async (req: Request, res: Response) => {
+  const adminID = req.user._id as string;
+  const { id } = req.params as { id: string };
 
-    res.status(200).json({
-      success: true,
-      message: "Dashboard data retrieved successfully",
-      data: {
-        stats: [
-          {
-            title: "Total Revenue",
-            value: `$${result.revenue.toLocaleString()}`,
-            icon: "wallet",
-          },
-          {
-            title: "Orders",
-            value: result.ordersCount.toString(),
-            icon: "cart",
-          },
-          {
-            title: "Customers",
-            value: result.customersCount.toString(),
-            icon: "people",
-          },
-          {
-            title: "Avg. Order Value",
-            value: `$${result.avgOrderValue.toFixed(2)}`,
-            icon: "stats",
-          },
-        ],
-        charts: {
-          salesOverview: result.formattedSales,
-        },
-        recentOrders: result.recentOrders,
-        topProducts: result.topProducts,
-      },
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+  const result = await OrderServices.updateOrderStatusByAdmin(
+    id,
+    req.body.status as string,
+    req.body.note as string,
+    adminID,
+  );
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Order status updated!",
+    data: result,
+  });
+});
 
 export const OrderControllers = {
   createOrder,
   getMyOrders,
-  updateOrderStatus,
   getSingleOrder,
+  cancelOrder,
   getAllOrders,
-  getAdminSingleOrder,
-  getDashboardStats,
+  updateOrderStatus,
 };

@@ -1,262 +1,244 @@
+// order.service.ts
 import { Order } from "./order.model";
-
-import { User } from "../auth/user.model";
-import mongoose from "mongoose";
 import { Product } from "../product/product.model";
+import { IOrder } from "./order.interface";
+import { calculateShipping } from "./order.config";
 
-// const createOrderIntoDB = async (orderData: any) => {
-//   const result = await Order.create(orderData);
-//   return result;
-// };
+const createOrderIntoDB = async (userID: string, payload: any) => {
+  const {
+    items,
+    deliveryType,
+    deliveryAddress,
+    paymentMethod,
+    preferredDeliveryTime,
+    couponCode,
+    specialInstructions,
+    isGift,
+    giftNote,
+  } = payload;
 
-const createOrderIntoDB = async (orderData: any) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    // crate order
-    const [result] = await Order.create([orderData], { session });
-
-    // sotck komano hocche
-    const updateStockPromises = result.cartItems.map((item: any) => {
-      return Product.findByIdAndUpdate(
-        item.product,
-        { $inc: { stock: -item.quantity } },
-        { session, new: true }
-      );
-    });
-
-    await Promise.all(updateStockPromises);
-
-    await session.commitTransaction();
-    session.endSession();
-    return result;
-  } catch (error: any) {
-    await session.abortTransaction();
-    session.endSession();
-    throw new Error(error.message || "Failed to place order");
+  if (!items || items.length === 0) {
+    throw new Error("Order must have at least one item!");
   }
-};
 
-const getMyOrdersFromDB = async (userId: string) => {
-  const result = await Order.find({ user: userId }).sort("-createdAt");
-  return result;
-};
+  // ১. প্রতিটি item validate + price fetch from DB (client price trust করবো না)
+  const orderItems = [];
+  let subtotal = 0;
 
-const getAllOrdersForAdmin = async () => {
-  return await Order.find().populate("user").sort("-createdAt");
-};
+  for (const item of items) {
+    const product = await Product.findById(item.productID).populate("unit");
+    if (!product) throw new Error(`Product not found: ${item.productID}`);
+    if (product.status !== "active")
+      throw new Error(`Product unavailable: ${product.name}`);
 
-// const updateOrderStatusInDB = async (orderId: string, status: string) => {
-//   return await Order.findByIdAndUpdate(orderId, { status }, { new: true });
-// };
+    let unitPrice = product.regularPrice;
+    let salePrice = product.salePrice;
+    let sku = product.sku;
+    let unit = (product.unit as any)?.name || "pcs";
 
-const updateOrderStatusInDB = async (orderId: string, status: string) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    
-    const order = await Order.findById(orderId).session(session);
-    if (!order) throw new Error("Order not found");
-
-    const oldStatus = order.status;
-
-   
-    if (status === "Cancelled" && oldStatus !== "Cancelled") {
-      const restoreStockPromises = order.cartItems.map((item: any) => {
-        return Product.findByIdAndUpdate(
-          item.product,
-          { $inc: { stock: item.quantity } }, // স্টক ফিরিয়ে দেওয়া (+ করা)
-          { session, new: true }
+    // variant থাকলে variant-এর দাম নেবো
+    if (item.variantIndex !== undefined && product.variants?.length) {
+      const variant = product.variants[item.variantIndex];
+      if (!variant) throw new Error(`Variant not found for: ${product.name}`);
+      if (variant.stock < item.quantity)
+        throw new Error(
+          `Insufficient stock for variant: ${variant.variantName}`,
         );
-      });
-      await Promise.all(restoreStockPromises);
+
+      unitPrice = variant.regularPrice;
+      salePrice = variant.salePrice;
+      sku = variant.sku;
+    } else {
+      // stock check
+      if (product.stock < item.quantity)
+        throw new Error(`Insufficient stock for: ${product.name}`);
     }
-    
 
-    const result = await Order.findByIdAndUpdate(
-      orderId,
-      { status },
-      { new: true, session }
-    );
+    const effectivePrice = salePrice || unitPrice;
+    const totalPrice = effectivePrice * item.quantity;
+    subtotal += totalPrice;
 
-    await session.commitTransaction();
-    session.endSession();
-    return result;
-  } catch (error: any) {
-    await session.abortTransaction();
-    session.endSession();
-    throw new Error(error.message || "Failed to update status");
+    orderItems.push({
+      productID: product._id,
+      variantIndex: item.variantIndex,
+      productName: product.name,
+      thumbnail: product.thumbnail,
+      sku,
+      quantity: item.quantity,
+      unit,
+      unitPrice,
+      salePrice,
+      totalPrice,
+    });
   }
+
+  // ২. Shipping calculate
+  const shippingCharge = calculateShipping(deliveryType, subtotal);
+
+  // ৩. Coupon (এখন simple, পরে coupon module যোগ করবে)
+  let couponDiscount = 0;
+  // TODO: coupon validation logic পরে আসবে
+
+  const discountAmount = couponDiscount; // এখন শুধু coupon discount
+  const totalAmount = subtotal - discountAmount + shippingCharge;
+
+  // ৪. Estimated delivery date
+  const estimatedDays = deliveryType === "local" ? 0 : 3;
+  const estimatedDelivery = new Date();
+  estimatedDelivery.setDate(estimatedDelivery.getDate() + estimatedDays);
+
+  const orderData: Partial<IOrder> = {
+    userID: userID as any,
+    items: orderItems,
+    subtotal,
+    discountAmount,
+    couponCode,
+    couponDiscount,
+    shippingCharge,
+    totalAmount,
+    deliveryType,
+    deliveryAddress,
+    preferredDeliveryTime,
+    estimatedDelivery,
+    paymentMethod,
+    paymentStatus: paymentMethod === "cod" ? "unpaid" : "unpaid",
+    specialInstructions,
+    isGift,
+    giftNote,
+  };
+
+  const order = await Order.create(orderData);
+
+  // ৫. Stock deduct (order confirmed হলে করবে, এখন pending-তেই করছি)
+  // পরে এটা "confirmed" status-এ move করতে পারো
+  for (const item of items) {
+    if (item.variantIndex !== undefined) {
+      await Product.findByIdAndUpdate(item.productID, {
+        $inc: { [`variants.${item.variantIndex}.stock`]: -item.quantity },
+      });
+    } else {
+      await Product.findByIdAndUpdate(item.productID, {
+        $inc: { stock: -item.quantity },
+      });
+    }
+  }
+
+  return order;
 };
 
-const getSingleOrderFromDB = async (orderId: string, userId: string) => {
-  const result = await Order.findOne({ _id: orderId, user: userId }).populate(
-    "cartItems.product",
+const getMyOrdersFromDB = async (userID: string, query: any) => {
+  const { page = 1, limit = 10, status } = query;
+  const filter: any = { userID, ...(status && { status }) };
+
+  const orders = await Order.find(filter)
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit))
+    .select("-statusTimeline"); // list-এ timeline দরকার নেই
+
+  const total = await Order.countDocuments(filter);
+
+  return { orders, total, page: Number(page), limit: Number(limit) };
+};
+
+const getSingleOrderFromDB = async (orderID: string, userID: string) => {
+  const order = await Order.findOne({ _id: orderID, userID }).populate(
+    "items.productID",
+    "name thumbnail slug",
   );
-  return result;
+  if (!order) throw new Error("Order not found!");
+  return order;
 };
 
-const getAllOrdersFromDB = async (
-  page: number,
-  limit: number,
-  search: string,
+const cancelOrderByUser = async (
+  orderID: string,
+  userID: string,
+  reason: string,
 ) => {
-  const skip = (page - 1) * limit;
+  const order = await Order.findOne({ _id: orderID, userID });
+  if (!order) throw new Error("Order not found!");
 
-  const query = search
-    ? {
-        $or: [
-          { email: { $regex: search, $options: "i" } },
-          { firstName: { $regex: search, $options: "i" } },
-        ],
-      }
-    : {};
+  const cancellableStatuses = ["pending", "confirmed"];
+  if (!cancellableStatuses.includes(order.status)) {
+    throw new Error(`Cannot cancel order in '${order.status}' status`);
+  }
 
-  const orders = await Order.find(query)
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  order.status = "cancelled";
+  order.cancelReason = reason;
+  order.cancelledBy = "user";
+  order.statusTimeline.push({
+    status: "cancelled",
+    changedAt: new Date(),
+    note: reason,
+  });
 
-  // সবগুলো স্ট্যাটাস কাউন্ট বের করা
-  const [
-    totalOrders,
-    pendingOrders,
-    processingOrders,
-    shippedOrders,
-    deliveredOrders,
-    cancelledOrders,
-  ] = await Promise.all([
-    Order.countDocuments(query),
-    Order.countDocuments({ status: "Pending" }),
-    Order.countDocuments({ status: "Processing" }),
-    Order.countDocuments({ status: "Shipped" }),
-    Order.countDocuments({ status: "Delivered" }),
-    Order.countDocuments({ status: "Cancelled" }),
-  ]);
+  // stock ফেরত দেওয়া
+  for (const item of order.items) {
+    if (item.variantIndex !== undefined) {
+      await Product.findByIdAndUpdate(item.productID, {
+        $inc: { [`variants.${item.variantIndex}.stock`]: item.quantity },
+      });
+    } else {
+      await Product.findByIdAndUpdate(item.productID, {
+        $inc: { stock: item.quantity },
+      });
+    }
+  }
 
-  const totalPages = Math.ceil(totalOrders / limit);
-
-  return {
-    orders,
-    stats: {
-      total: totalOrders,
-      pending: pendingOrders,
-      processing: processingOrders,
-      shipped: shippedOrders,
-      delivered: deliveredOrders,
-      cancelled: cancelledOrders,
-    },
-    pagination: {
-      totalOrders,
-      totalPages,
-      currentPage: page,
-    },
-  };
+  await order.save();
+  return order;
 };
 
-const getAdminSingleOrderFromDB = async (orderId: string) => {
-  const result = await Order.findById(orderId)
-    .populate("user", "firstName lastName email phone")
-    .lean();
-  return result;
+// Admin: সব অর্ডার দেখবে + filter
+const getAllOrdersFromDB = async (query: any) => {
+  const { page = 1, limit = 20, status, deliveryType, from, to } = query;
+
+  const filter: any = {};
+  if (status) filter.status = status;
+  if (deliveryType) filter.deliveryType = deliveryType;
+  if (from || to) {
+    filter.createdAt = {};
+    if (from) filter.createdAt.$gte = new Date(from);
+    if (to) filter.createdAt.$lte = new Date(to);
+  }
+
+  const orders = await Order.find(filter)
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit))
+    .populate("userID", "name phone email");
+
+  const total = await Order.countDocuments(filter);
+  return { orders, total, page: Number(page), limit: Number(limit) };
 };
 
-// dashboard overview
-export const getDashboardStatsFromDB = async () => {
-  // ১. রেভিনিউ এবং টোটাল অর্ডার স্ট্যাটস (Aggregation)
-  const stats = await Order.aggregate([
-    {
-      $facet: {
-        totalRevenue: [
-          { $match: { status: "Delivered" } },
-          { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-        ],
-        totalOrders: [{ $count: "count" }],
-        avgValue: [{ $group: { _id: null, avg: { $avg: "$totalAmount" } } }],
-      },
-    },
-  ]);
+// Admin: status update
+const updateOrderStatusByAdmin = async (
+  orderID: string,
+  status: string,
+  note: string,
+  adminID: string,
+) => {
+  const order = await Order.findById(orderID);
+  if (!order) throw new Error("Order not found!");
 
-  const revenue = stats[0].totalRevenue[0]?.total || 0;
-  const ordersCount = stats[0].totalOrders[0]?.count || 0;
-  const avgOrderValue = stats[0].avgValue[0]?.avg || 0;
-  const customersCount = await User.countDocuments({ role: "user" });
+  order.status = status as any;
+  order.statusTimeline.push({
+    status: status as any,
+    changedAt: new Date(),
+    note,
+    changedBy: adminID as any,
+  });
 
-  
-  const salesData = await Order.aggregate([
-    {
-      $group: {
-        _id: { $month: "$createdAt" },
-        value: { $sum: "$totalAmount" },
-      },
-    },
-    { $sort: { _id: 1 } },
-    { $limit: 6 },
-  ]);
-
-  const monthNames = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const formattedSales = salesData.map((item) => ({
-    name: monthNames[item._id - 1],
-    value: item.value,
-  }));
-
-  // ৩. রিসেন্ট অর্ডার ও টপ পারফর্মিং প্রোডাক্ট
-  const recentOrders = await Order.find()
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .populate("user", "firstName lastName");
-
-  const topProducts = await Order.aggregate([
-    { $unwind: "$cartItems" },
-    {
-      $group: {
-        _id: "$cartItems.productId",
-        name: { $first: "$cartItems.name" },
-        img: { $first: "$cartItems.image" },
-        sales: { $sum: "$cartItems.quantity" },
-        revenue: {
-          $sum: { $multiply: ["$cartItems.price", "$cartItems.quantity"] },
-        },
-      },
-    },
-    { $sort: { sales: -1 } },
-    { $limit: 5 },
-  ]);
-
-  return {
-    revenue,
-    ordersCount,
-    customersCount,
-    avgOrderValue,
-    formattedSales,
-    recentOrders,
-    topProducts,
-  };
+  await order.save();
+  return order;
 };
 
 export const OrderServices = {
   createOrderIntoDB,
   getMyOrdersFromDB,
-  getAllOrdersForAdmin,
-  updateOrderStatusInDB,
   getSingleOrderFromDB,
+  cancelOrderByUser,
   getAllOrdersFromDB,
-  getAdminSingleOrderFromDB,
-  getDashboardStatsFromDB
+  updateOrderStatusByAdmin,
 };
