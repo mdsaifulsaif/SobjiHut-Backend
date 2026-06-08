@@ -1,5 +1,8 @@
 import { Router } from "express";
-import { getProductsController, ProductControllers } from "./product.controller";
+import {
+  getProductsController,
+  ProductControllers,
+} from "./product.controller";
 import { isAuthenticated, isAdmin } from "../../middlewares/auth.middleware";
 import { upload } from "../../middlewares/multer.middleware";
 
@@ -24,7 +27,7 @@ router.patch(
     { name: "thumbnail", maxCount: 1 },
     { name: "images", maxCount: 5 },
   ]),
-  ProductControllers.updateProduct
+  ProductControllers.updateProduct,
 );
 
 router.get("/", ProductControllers.getAllProducts);
@@ -43,10 +46,10 @@ router.delete(
   ProductControllers.deleteProduct,
 );
 
-router.get("/bestselling", ProductControllers.getBestsellingProducts);
+// router.get("/bestselling", ProductControllers.getBestsellingProducts);
 
-router.get('/related-products', ProductControllers.getRelatedProducts);
-router.get('/low-stock', ProductControllers.getLowStockProducts);
+router.get("/related-products", ProductControllers.getRelatedProducts);
+router.get("/low-stock", ProductControllers.getLowStockProducts);
 
 router.get("/:id", ProductControllers.getSingleProduct);
 

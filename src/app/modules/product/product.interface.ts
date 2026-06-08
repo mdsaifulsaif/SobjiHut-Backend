@@ -1,14 +1,15 @@
+import { Types } from "mongoose";
+
 export interface GetProductsParams {
   isNew?: string;
   limit?: number;
 }
 
-import { Types } from "mongoose";
-
 export interface IProductVariant {
   _id?: string;
-  variantName: string;
+  // variantName সরানো হয়েছে — unitID populate করে name আনা হবে
   weightOrVolume: number;
+  unitID: Types.ObjectId | string;
   regularPrice: number;
   salePrice?: number;
   stock: number;
@@ -18,7 +19,7 @@ export interface IProductVariant {
 export interface IComboItem {
   productID: Types.ObjectId | string;
   quantity: number;
-  selectedVariant?: string;
+  selectedVariant?: Types.ObjectId | string; // variant এর _id
 }
 
 export interface ISpecification {
@@ -56,7 +57,8 @@ export interface IProduct {
   numReviews?: number;
   status: "active" | "inactive" | "draft";
   productType: "single" | "combo";
-  unit: Types.ObjectId | string; // 👈 ইউনিট রিলেশন আইডি
+  unit: Types.ObjectId | string; // single product এর unit
+  weightOrVolume?: number; // single product এর weight/volume
   variants?: IProductVariant[];
   comboItems?: IComboItem[];
   specifications?: ISpecification[];

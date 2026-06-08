@@ -6,8 +6,6 @@ import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
 import { Product } from "./product.model";
 import { deleteFromCloudinary } from "../../utils/deleteFromCloudinary";
 
-
-
 const createProduct = catchAsync(async (req: Request, res: Response) => {
   // বডি এবং ফাইল সরাসরি সার্ভিসে পাঠানো হচ্ছে
   const result = await ProductServices.createProductIntoDB(req.body, req.files);
@@ -20,26 +18,27 @@ const createProduct = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-
-
 const updateProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const result = await ProductServices.updateProductIntoDB(id as string, req.body, req.files); // ProductServices থেকে call করুন
+    const result = await ProductServices.updateProductIntoDB(
+      id as string,
+      req.body,
+      req.files,
+    ); // ProductServices থেকে call করুন
 
     res.status(200).json({
       success: true,
-      message: 'Product updated successfully!',
+      message: "Product updated successfully!",
       data: result,
     });
   } catch (error: any) {
     res.status(400).json({
       success: false,
-      message: error.message || 'Something went wrong',
+      message: error.message || "Something went wrong",
     });
   }
 };
-
 
 const getAllProducts = catchAsync(async (req: Request, res: Response) => {
   const result = await ProductServices.getAllProductsFromDB(req.query);
@@ -52,8 +51,6 @@ const getAllProducts = catchAsync(async (req: Request, res: Response) => {
     data: result.data,
   });
 });
-
-
 
 export const getProductsController = async (req: Request, res: Response) => {
   try {
@@ -122,21 +119,6 @@ const deleteProduct = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const getBestsellingProducts = catchAsync(
-  async (req: Request, res: Response) => {
-    const limit = Number(req.query.limit) || 4;
-
-    const result = await ProductServices.getBestsellingProductsFromDB(limit);
-
-    sendResponse(res, {
-      statusCode: 200,
-      success: true,
-      message: "Bestselling products retrieved successfully!",
-      data: result,
-    });
-  },
-);
-
 const getRelatedProducts = catchAsync(async (req: Request, res: Response) => {
   const { categoryId, productId } = req.query; // Query theke nilam
 
@@ -152,7 +134,6 @@ const getRelatedProducts = catchAsync(async (req: Request, res: Response) => {
     data: result,
   });
 });
-
 
 const getLowStockProducts = async (req: Request, res: Response) => {
   try {
@@ -178,8 +159,7 @@ export const ProductControllers = {
   getAllProducts,
   deleteProduct,
   getSingleProduct,
-  getBestsellingProducts,
   getRelatedProducts,
   updateProduct,
-  getLowStockProducts
+  getLowStockProducts,
 };

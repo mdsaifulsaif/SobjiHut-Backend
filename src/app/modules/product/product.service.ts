@@ -1,11 +1,11 @@
 import { GetProductsParams, IProduct } from "./product.interface";
 import { Product } from "./product.model";
-import { Order } from "../order/order.model";
 import slugify from "slugify";
 import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
 import { PipelineStage } from "mongoose";
 import cloudinary from "../../config/cloudinary";
 
+// ===================== CREATE =====================
 const createProductIntoDB = async (body: Record<string, any>, files: any) => {
   const {
     name,
@@ -18,25 +18,60 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     productType,
   } = body;
 
-  // ১. আগে variants parse করো
+  // ১. variants parse
   let variants: any[] = [];
   try {
     if (body.variants) variants = JSON.parse(body.variants);
-  } catch (error) {
+  } catch {
     throw new Error("Invalid JSON format for variants.");
   }
 
   const hasVariants = variants && variants.length > 0;
 
-  // ২. Required field validation
+  // ২. required field validation
   if (!name || !shortDescription || !categoryID || !unit) {
-    throw new Error("Please provide all required fields: name, shortDescription, categoryID, and unit.");
+    throw new Error(
+      "Please provide: name, shortDescription, categoryID, unit.",
+    );
   }
 
-  // variant না থাকলে regularPrice এবং stock required
   if (!hasVariants) {
-    if (!body.regularPrice) throw new Error("Regular price is required for non-variant products.");
-    if (stock === undefined) throw new Error("Stock is required for non-variant products.");
+    if (!body.regularPrice) throw new Error("Regular price is required.");
+    if (stock === undefined) throw new Error("Stock is required.");
+    if (!body.weightOrVolume)
+      throw new Error("weightOrVolume is required for single product.");
+  }
+
+  // ৩. variant validation
+  if (hasVariants) {
+    const seen = new Set<string>();
+
+    for (const variant of variants) {
+      // unitID required
+      if (!variant.unitID) {
+        throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
+      }
+      // regularPrice required
+      if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
+        throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
+      }
+      // weightOrVolume required
+      if (
+        variant.weightOrVolume === undefined ||
+        variant.weightOrVolume === null
+      ) {
+        throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
+      }
+
+      // ✅ Duplicate unitID + weightOrVolume check
+      const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
+      if (seen.has(key)) {
+        throw new Error(
+          `Duplicate variant: unitID "${variant.unitID}" তে weightOrVolume "${variant.weightOrVolume}" ইতিমধ্যে আছে।`,
+        );
+      }
+      seen.add(key);
+    }
   }
 
   const cost = Number(costPrice) || 0;
@@ -44,25 +79,18 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     ? Number(variants[0]?.regularPrice || 0)
     : Number(body.regularPrice);
   const qty = hasVariants
-    ? variants.reduce((total: number, v: any) => total + Number(v.stock || 0), 0)
+    ? variants.reduce(
+        (total: number, v: any) => total + Number(v.stock || 0),
+        0,
+      )
     : Number(stock);
   const sale = body.salePrice ? Number(body.salePrice) : undefined;
 
-  // ৩. Price validation — variant থাকলে base price check করবে না
   if (!hasVariants) {
-    if (cost <= 0 || regular <= 0) {
+    if (cost <= 0 || regular <= 0)
       throw new Error("Prices must be greater than zero.");
-    }
-    if (sale && sale >= regular) {
+    if (sale && sale >= regular)
       throw new Error("Sale price must be less than regular price.");
-    }
-  } else {
-    // variant এর price validate করো
-    for (const variant of variants) {
-      if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
-        throw new Error(`Variant "${variant.variantName}" এর Regular Price must be greater than zero.`);
-      }
-    }
   }
 
   // ৪. বাকি JSON parse
@@ -76,55 +104,44 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     if (body.lowdown) lowdown = JSON.parse(body.lowdown);
     if (body.comboItems) comboItems = JSON.parse(body.comboItems);
     if (body.specifications) specifications = JSON.parse(body.specifications);
-  } catch (error) {
-    throw new Error("Invalid JSON format for array or object fields.");
+  } catch {
+    throw new Error("Invalid JSON format for array fields.");
   }
 
-  // ৫. Combo validation
+  // ৫. combo validation
   if (productType === "combo") {
     if (!comboItems || comboItems.length === 0) {
-      throw new Error("A combo product must contain at least one valid item.");
+      throw new Error("Combo product must have at least one item.");
     }
-
     for (const item of comboItems) {
-      if (!item.productID) {
-        throw new Error("Each combo item must have a valid productID.");
-      }
-
+      if (!item.productID)
+        throw new Error("Each combo item must have productID.");
       const dbProduct = await Product.findById(item.productID);
-      if (!dbProduct) {
-        throw new Error(`Product with ID ${item.productID} not found in database.`);
-      }
-
+      if (!dbProduct) throw new Error(`Product not found: ${item.productID}`);
       const requiredQty = Number(item.quantity || 1);
-
       if (item.selectedVariant) {
         const targetVariant = dbProduct.variants?.find(
-          (v: any) => v.variantName === item.selectedVariant,
+          (v: any) => v._id?.toString() === item.selectedVariant,
         );
-        if (!targetVariant) {
-          throw new Error(`Variant "${item.selectedVariant}" not found for product "${dbProduct.name}".`);
-        }
-        const availableStock = Number(targetVariant.stock || 0);
-        if (availableStock <= 0) {
-          throw new Error(`Cannot create combo! Variant "${item.selectedVariant}" of product "${dbProduct.name}" is currently Out of Stock.`);
-        }
-        if (requiredQty > availableStock) {
-          throw new Error(`Cannot create combo! Requested quantity (${requiredQty}) for variant "${item.selectedVariant}" exceeds available stock (${availableStock}) in "${dbProduct.name}".`);
-        }
+        if (!targetVariant)
+          throw new Error(`Variant "${item.selectedVariant}" not found.`);
+        if (Number(targetVariant.stock) <= 0)
+          throw new Error(`Variant "${item.selectedVariant}" is Out of Stock.`);
+        if (requiredQty > Number(targetVariant.stock))
+          throw new Error(
+            `Insufficient stock for variant "${item.selectedVariant}".`,
+          );
       } else {
-        const availableStock = Number(dbProduct.stock || 0);
-        if (availableStock <= 0) {
-          throw new Error(`Cannot create combo! "${dbProduct.name}" is currently Out of Stock.`);
-        }
-        if (requiredQty > availableStock) {
-          throw new Error(`Cannot create combo! Requested quantity (${requiredQty}) for "${dbProduct.name}" exceeds available stock (${availableStock}).`);
-        }
+        const available = dbProduct.stock - (dbProduct.reservedStock || 0);
+        if (available <= 0)
+          throw new Error(`"${dbProduct.name}" is Out of Stock.`);
+        if (requiredQty > available)
+          throw new Error(`Insufficient stock for "${dbProduct.name}".`);
       }
     }
   }
 
-  // ৬. Dimensions
+  // ৬. dimensions
   const dimensions =
     body.length || body.width || body.height
       ? {
@@ -134,7 +151,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
         }
       : undefined;
 
-  // ৭. Payload
+  // ৭. payload
   const productData: Partial<IProduct> = {
     name,
     shortDescription,
@@ -146,6 +163,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     regularPrice: regular,
     salePrice: sale,
     stock: qty,
+    weightOrVolume: !hasVariants ? Number(body.weightOrVolume) : undefined,
     sku: body.sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     lowStockAlert: body.lowStockAlert ? Number(body.lowStockAlert) : 10,
     brandID: body.brandID || "nonebrand",
@@ -166,70 +184,98 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     dimensions,
   };
 
-  // ৮. Thumbnail upload
+  // ৮. thumbnail upload
   const thumbnailFiles = files?.thumbnail;
   if (thumbnailFiles && thumbnailFiles[0]) {
-    const result: any = await uploadToCloudinary(thumbnailFiles[0].buffer, "glowly_products/thumbnails");
+    const result: any = await uploadToCloudinary(
+      thumbnailFiles[0].buffer,
+      "glowly_products/thumbnails",
+    );
     productData.thumbnail = result.secure_url || result.url;
   } else {
     throw new Error("Product thumbnail is required!");
   }
 
-  // ৯. Gallery upload
+  // ৯. gallery upload
   const galleryFiles = files?.images;
   if (galleryFiles && galleryFiles.length > 0) {
     const uploadResults: any[] = await Promise.all(
-      galleryFiles.map((file: any) => uploadToCloudinary(file.buffer, "glowly_products/gallery")),
+      galleryFiles.map((file: any) =>
+        uploadToCloudinary(file.buffer, "glowly_products/gallery"),
+      ),
     );
     productData.images = uploadResults.map((res) => res.secure_url || res.url);
   }
 
-  const result = await Product.create(productData);
-  return result;
+  return await Product.create(productData);
 };
 
-
-// ===================== UPDATE SERVICE =====================
-const updateProductIntoDB = async (id: string, body: Record<string, any>, files: any) => {
-  // ১. Product exists চেক
+// ===================== UPDATE =====================
+const updateProductIntoDB = async (
+  id: string,
+  body: Record<string, any>,
+  files: any,
+) => {
   const existingProduct = await Product.findById(id);
-  if (!existingProduct) {
-    throw new Error("Product not found!");
-  }
+  if (!existingProduct) throw new Error("Product not found!");
 
-  // ২. আগে variants parse করো
-let variants: any[] = (existingProduct.variants ?? []) as any[];
-try {
+  // ১. variants parse
+  let variants: any[] = (existingProduct.variants ?? []) as any[];
+  try {
     if (body.variants) variants = JSON.parse(body.variants);
-} catch (error) {
+  } catch {
     throw new Error("Invalid JSON format for variants.");
-}
+  }
 
   const hasVariants = variants && variants.length > 0;
 
-  // ৩. Price validation
-  if (body.regularPrice || body.costPrice) {
-    if (!hasVariants) {
-      const cost = Number(body.costPrice || existingProduct.costPrice);
-      const regular = Number(body.regularPrice || existingProduct.regularPrice);
-      const sale = body.salePrice !== undefined ? Number(body.salePrice) : existingProduct.salePrice;
+  // ২. variant validation
+  if (hasVariants) {
+    const seen = new Set<string>();
 
-      if (cost <= 0 || regular <= 0) {
-        throw new Error("Prices must be greater than zero.");
+    for (const variant of variants) {
+      // unitID required
+      if (!variant.unitID) {
+        throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
       }
-      if (sale && sale >= regular) {
-        throw new Error("Sale price must be less than regular price.");
+      // regularPrice required
+      if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
+        throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
       }
-    } else {
-      for (const variant of variants) {
-        if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
-          throw new Error(`Variant "${variant.variantName}" এর Regular Price must be greater than zero.`);
-        }
+      // weightOrVolume required
+      if (
+        variant.weightOrVolume === undefined ||
+        variant.weightOrVolume === null
+      ) {
+        throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
       }
+
+      // ✅ Duplicate unitID + weightOrVolume check
+      const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
+      if (seen.has(key)) {
+        throw new Error(
+          `Duplicate variant: unitID "${variant.unitID}" তে weightOrVolume "${variant.weightOrVolume}" ইতিমধ্যে আছে।`,
+        );
+      }
+      seen.add(key);
     }
   }
 
-  // ৪. বাকি JSON parse
+  // ৩. price validation (single product)
+  if (!hasVariants && (body.regularPrice || body.costPrice)) {
+    const cost = Number(body.costPrice || existingProduct.costPrice);
+    const regular = Number(body.regularPrice || existingProduct.regularPrice);
+    const sale =
+      body.salePrice !== undefined
+        ? Number(body.salePrice)
+        : existingProduct.salePrice;
+    if (cost <= 0 || regular <= 0)
+      throw new Error("Prices must be greater than zero.");
+    if (sale && sale >= regular)
+      throw new Error("Sale price must be less than regular price.");
+  }
+
+  // ৪. JSON parse
   let tags = existingProduct.tags;
   let lowdown = existingProduct.lowdown;
   let comboItems = existingProduct.comboItems;
@@ -240,66 +286,46 @@ try {
     if (body.lowdown) lowdown = JSON.parse(body.lowdown);
     if (body.comboItems) comboItems = JSON.parse(body.comboItems);
     if (body.specifications) specifications = JSON.parse(body.specifications);
-  } catch (error) {
-    throw new Error("Invalid JSON format for array or object fields.");
+  } catch {
+    throw new Error("Invalid JSON format for array fields.");
   }
 
-  // ৫. Combo validation
+  // ৫. combo validation
   const productType = body.productType || existingProduct.productType;
   if (productType === "combo" && body.comboItems) {
-    if (!comboItems || comboItems.length === 0) {
-      throw new Error("A combo product must contain at least one valid item.");
-    }
-
+    if (!comboItems || comboItems.length === 0)
+      throw new Error("Combo must have at least one item.");
     for (const item of comboItems) {
-      if (!item.productID) {
-        throw new Error("Each combo item must have a valid productID.");
-      }
-
+      if (!item.productID)
+        throw new Error("Each combo item must have productID.");
       const dbProduct = await Product.findById(item.productID);
-      if (!dbProduct) {
-        throw new Error(`Product with ID ${item.productID} not found.`);
-      }
-
+      if (!dbProduct) throw new Error(`Product not found: ${item.productID}`);
       const requiredQty = Number(item.quantity || 1);
-
-      if (item.selectedVariant) {
-        const targetVariant = dbProduct.variants?.find(
-          (v: any) => v.variantName === item.selectedVariant,
-        );
-        if (!targetVariant) {
-          throw new Error(`Variant "${item.selectedVariant}" not found for product "${dbProduct.name}".`);
-        }
-        const availableStock = Number(targetVariant.stock || 0);
-        if (availableStock <= 0) {
-          throw new Error(`Variant "${item.selectedVariant}" of "${dbProduct.name}" is Out of Stock.`);
-        }
-        if (requiredQty > availableStock) {
-          throw new Error(`Requested quantity (${requiredQty}) for variant "${item.selectedVariant}" exceeds available stock (${availableStock}).`);
-        }
-      } else {
-        const availableStock = Number(dbProduct.stock || 0);
-        if (availableStock <= 0) {
-          throw new Error(`"${dbProduct.name}" is Out of Stock.`);
-        }
-        if (requiredQty > availableStock) {
-          throw new Error(`Requested quantity (${requiredQty}) for "${dbProduct.name}" exceeds available stock (${availableStock}).`);
-        }
-      }
+      const available = dbProduct.stock - (dbProduct.reservedStock || 0);
+      if (available <= 0)
+        throw new Error(`"${dbProduct.name}" is Out of Stock.`);
+      if (requiredQty > available)
+        throw new Error(`Insufficient stock for "${dbProduct.name}".`);
     }
   }
 
-  // ৬. Dimensions
+  // ৬. dimensions
   const dimensions =
     body.length || body.width || body.height
       ? {
-          length: body.length ? Number(body.length) : existingProduct.dimensions?.length,
-          width: body.width ? Number(body.width) : existingProduct.dimensions?.width,
-          height: body.height ? Number(body.height) : existingProduct.dimensions?.height,
+          length: body.length
+            ? Number(body.length)
+            : existingProduct.dimensions?.length,
+          width: body.width
+            ? Number(body.width)
+            : existingProduct.dimensions?.width,
+          height: body.height
+            ? Number(body.height)
+            : existingProduct.dimensions?.height,
         }
       : existingProduct.dimensions;
 
-  // ৭. Update payload — variant থাকলে stock ও price auto set
+  // ৭. update payload
   const updateData: Partial<IProduct> = {
     ...(body.name && { name: body.name }),
     ...(body.shortDescription && { shortDescription: body.shortDescription }),
@@ -309,27 +335,53 @@ try {
     ...(body.brandID && { brandID: body.brandID }),
     ...(body.productType && { productType: body.productType }),
     ...(body.costPrice && { costPrice: Number(body.costPrice) }),
-    // ✅ variant থাকলে first variant এর price নাও, না থাকলে body থেকে নাও
+
+    // variant থাকলে first variant এর price, না থাকলে body থেকে
     regularPrice: hasVariants
       ? Number(variants[0]?.regularPrice || existingProduct.regularPrice)
-      : (body.regularPrice ? Number(body.regularPrice) : existingProduct.regularPrice),
-    // ✅ variant থাকলে total stock auto calculate
+      : body.regularPrice
+        ? Number(body.regularPrice)
+        : existingProduct.regularPrice,
+
+    // variant থাকলে total stock, না থাকলে body থেকে
     stock: hasVariants
-      ? variants.reduce((total: number, v: any) => total + Number(v.stock || 0), 0)
-      : (body.stock !== undefined ? Number(body.stock) : existingProduct.stock),
+      ? variants.reduce(
+          (total: number, v: any) => total + Number(v.stock || 0),
+          0,
+        )
+      : body.stock !== undefined
+        ? Number(body.stock)
+        : existingProduct.stock,
+
+    // single product এর weightOrVolume
+    ...(!hasVariants &&
+      body.weightOrVolume && {
+        weightOrVolume: Number(body.weightOrVolume),
+      }),
+
     ...(body.salePrice !== undefined && { salePrice: Number(body.salePrice) }),
     ...(body.sku && { sku: body.sku }),
-    ...(body.lowStockAlert !== undefined && { lowStockAlert: Number(body.lowStockAlert) }),
+    ...(body.lowStockAlert !== undefined && {
+      lowStockAlert: Number(body.lowStockAlert),
+    }),
     ...(body.weight !== undefined && { weight: Number(body.weight) }),
-    ...(body.shippingCost !== undefined && { shippingCost: Number(body.shippingCost) }),
+    ...(body.shippingCost !== undefined && {
+      shippingCost: Number(body.shippingCost),
+    }),
     ...(body.shippingClass && { shippingClass: body.shippingClass }),
-    ...(body.freeShipping !== undefined && { freeShipping: body.freeShipping === 'true' }),
-    ...(body.isFeatured !== undefined && { isFeatured: body.isFeatured === 'true' }),
-    ...(body.isOnSale !== undefined && { isOnSale: body.isOnSale === 'true' }),
-    ...(body.isNew !== undefined && { isNew: body.isNew === 'true' }),
+    ...(body.freeShipping !== undefined && {
+      freeShipping: body.freeShipping === "true",
+    }),
+    ...(body.isFeatured !== undefined && {
+      isFeatured: body.isFeatured === "true",
+    }),
+    ...(body.isOnSale !== undefined && { isOnSale: body.isOnSale === "true" }),
+    ...(body.isNew !== undefined && { isNew: body.isNew === "true" }),
     ...(body.status && { status: body.status }),
     ...(body.metaTitle !== undefined && { metaTitle: body.metaTitle }),
-    ...(body.metaDescription !== undefined && { metaDescription: body.metaDescription }),
+    ...(body.metaDescription !== undefined && {
+      metaDescription: body.metaDescription,
+    }),
     ...(body.straight_up !== undefined && { straight_up: body.straight_up }),
     tags,
     lowdown,
@@ -339,46 +391,53 @@ try {
     dimensions,
   };
 
-  // ৮. Thumbnail update
+  // ৮. thumbnail update
   const thumbnailFiles = files?.thumbnail;
   if (thumbnailFiles && thumbnailFiles[0]) {
     if (existingProduct.thumbnail) {
       const publicId = existingProduct.thumbnail
-        .split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
+        .split("/")
+        .slice(-2)
+        .join("/")
+        .replace(/\.[^/.]+$/, "");
       await cloudinary.uploader.destroy(publicId);
     }
-    const result: any = await uploadToCloudinary(thumbnailFiles[0].buffer, 'glowly_products/thumbnails');
+    const result: any = await uploadToCloudinary(
+      thumbnailFiles[0].buffer,
+      "glowly_products/thumbnails",
+    );
     updateData.thumbnail = result.secure_url || result.url;
   }
 
-  // ৯. Gallery update
+  // ৯. gallery update
   const galleryFiles = files?.images;
   if (galleryFiles && galleryFiles.length > 0) {
     if (existingProduct.images && existingProduct.images.length > 0) {
       await Promise.all(
         existingProduct.images.map((imgUrl: string) => {
-          const publicId = imgUrl.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
+          const publicId = imgUrl
+            .split("/")
+            .slice(-2)
+            .join("/")
+            .replace(/\.[^/.]+$/, "");
           return cloudinary.uploader.destroy(publicId);
         }),
       );
     }
     const uploadResults: any[] = await Promise.all(
-      galleryFiles.map((file: any) => uploadToCloudinary(file.buffer, 'glowly_products/gallery')),
+      galleryFiles.map((file: any) =>
+        uploadToCloudinary(file.buffer, "glowly_products/gallery"),
+      ),
     );
     updateData.images = uploadResults.map((res) => res.secure_url || res.url);
   }
 
-  const updatedProduct = await Product.findByIdAndUpdate(
+  return await Product.findByIdAndUpdate(
     id,
     { $set: updateData },
     { new: true, runValidators: true },
-  ).populate('categoryID', 'name image');
-
-  return updatedProduct;
+  ).populate("categoryID", "name image");
 };
-
-
-
 
 export const getNewProductsService = async (params: GetProductsParams) => {
   const { isNew, limit } = params;
@@ -400,9 +459,15 @@ export const getNewProductsService = async (params: GetProductsParams) => {
 };
 
 const getAllProductsFromDB = async (query: Record<string, any>) => {
-  const { 
-    searchTerm, category, productType, status, isFeatured, 
-    page = 1, limit = 8, sort = "-createdAt" 
+  const {
+    searchTerm,
+    category,
+    productType,
+    status,
+    isFeatured,
+    page = 1,
+    limit = 8,
+    sort = "-createdAt",
   } = query;
 
   const pageNum = Number(page);
@@ -418,7 +483,7 @@ const getAllProductsFromDB = async (query: Record<string, any>) => {
   if (category) matchStage.categoryID = category;
   if (productType) matchStage.productType = productType;
   if (status) matchStage.status = status;
-  if (isFeatured !== undefined) matchStage.isFeatured = isFeatured === 'true';
+  if (isFeatured !== undefined) matchStage.isFeatured = isFeatured === "true";
 
   // সমাধান: Facet এর ভেতরের স্টেজগুলোকে 'any' হিসেবে চিহ্নিত করা যাতে টাইপ এরর না আসে
   const pipeline: PipelineStage[] = [
@@ -429,23 +494,38 @@ const getAllProductsFromDB = async (query: Record<string, any>) => {
           { $sort: { [sort.replace("-", "")]: sort.startsWith("-") ? -1 : 1 } },
           { $skip: (pageNum - 1) * limitNum },
           { $limit: limitNum },
-          { $lookup: { from: "categories", localField: "categoryID", foreignField: "_id", as: "categoryID" } },
-          { $unwind: { path: "$categoryID", preserveNullAndEmptyArrays: true } }
+          {
+            $lookup: {
+              from: "categories",
+              localField: "categoryID",
+              foreignField: "_id",
+              as: "categoryID",
+            },
+          },
+          {
+            $unwind: { path: "$categoryID", preserveNullAndEmptyArrays: true },
+          },
         ] as any, // 👈 এখানে 'as any' ব্যবহার করলে এরর চলে যাবে
         metaCounts: [
           {
             $group: {
               _id: null,
               total: { $sum: 1 },
-              active: { $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] } },
-              inactive: { $sum: { $cond: [{ $eq: ["$status", "inactive"] }, 1, 0] } },
-              lowStock: { $sum: { $cond: [{ $lte: ["$stock", "$lowStockAlert"] }, 1, 0] } },
-              featured: { $sum: { $cond: ["$isFeatured", 1, 0] } }
-            }
-          }
-        ] as any // 👈 এখানে 'as any' ব্যবহার করুন
-      }
-    }
+              active: {
+                $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] },
+              },
+              inactive: {
+                $sum: { $cond: [{ $eq: ["$status", "inactive"] }, 1, 0] },
+              },
+              lowStock: {
+                $sum: { $cond: [{ $lte: ["$stock", "$lowStockAlert"] }, 1, 0] },
+              },
+              featured: { $sum: { $cond: ["$isFeatured", 1, 0] } },
+            },
+          },
+        ] as any, // 👈 এখানে 'as any' ব্যবহার করুন
+      },
+    },
   ];
 
   const result = await Product.aggregate(pipeline);
@@ -458,7 +538,13 @@ const getAllProductsFromDB = async (query: Record<string, any>) => {
       limit: limitNum,
       total: total,
       totalPage: Math.ceil(total / limitNum),
-      counts: facetData.metaCounts[0] || { total: 0, active: 0, inactive: 0, lowStock: 0, featured: 0 }
+      counts: facetData.metaCounts[0] || {
+        total: 0,
+        active: 0,
+        inactive: 0,
+        lowStock: 0,
+        featured: 0,
+      },
     },
     data: facetData.data,
   };
@@ -475,50 +561,6 @@ const getSingleProductFromDB = async (id: string) => {
   if (!result) {
     throw new Error("Product not found!");
   }
-
-  return result;
-};
-
-const getBestsellingProductsFromDB = async (limit: number) => {
-  const result = await Order.aggregate([
-    { $unwind: "$cartItems" },
-
-    {
-      $group: {
-        _id: "$cartItems.product",
-        totalSold: { $sum: "$cartItems.quantity" },
-      },
-    },
-
-    { $sort: { totalSold: -1 } },
-
-    {
-      $lookup: {
-        from: "products",
-        localField: "_id",
-        foreignField: "_id",
-        as: "fullProduct",
-      },
-    },
-
-    { $unwind: "$fullProduct" },
-
-    {
-      $match: {
-        "fullProduct.status": "active",
-      },
-    },
-
-    { $limit: limit },
-
-    {
-      $project: {
-        _id: 0,
-        totalSold: 1,
-        product: "$fullProduct",
-      },
-    },
-  ]);
 
   return result;
 };
@@ -552,7 +594,6 @@ export const ProductServices = {
   getAllProductsFromDB,
   getSingleProductFromDB,
   deleteProductFromDB,
-  getBestsellingProductsFromDB,
   getRelatedProductsFromDB,
   updateProductIntoDB,
   getNewProductsService,
