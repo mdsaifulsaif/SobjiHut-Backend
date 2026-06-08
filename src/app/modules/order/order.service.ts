@@ -119,7 +119,7 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
   return order;
 };
 
-// ✅ Admin confirm করলে actual stock কাটো + reserve মুক্ত করো
+//  Admin confirm করলে actual stock কাটো + reserve মুক্ত করো
 const updateOrderStatusByAdmin = async (
   orderID: string,
   status: string,
@@ -164,7 +164,7 @@ const updateOrderStatusByAdmin = async (
   return order;
 };
 
-// ✅ Cancel হলে reserve ফেরত দাও (actual stock অপরিবর্তিত)
+//  Cancel হলে reserve ফেরত দাও (actual stock অপরিবর্তিত)
 const cancelOrderByUser = async (
   orderID: string,
   userID: string,
