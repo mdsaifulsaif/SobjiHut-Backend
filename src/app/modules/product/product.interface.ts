@@ -18,6 +18,7 @@ export interface IProductVariant {
 export interface IComboItem {
   productID: Types.ObjectId | string;
   quantity: number;
+  selectedVariant?: string;
 }
 
 export interface ISpecification {

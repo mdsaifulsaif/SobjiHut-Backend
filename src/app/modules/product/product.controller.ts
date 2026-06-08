@@ -22,79 +22,24 @@ const createProduct = catchAsync(async (req: Request, res: Response) => {
 
 
 
-const updateProduct = catchAsync(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-
-  const updateData: any = { ...req.body };
-
-  //  Number convert
-  if (req.body.costPrice) updateData.costPrice = Number(req.body.costPrice);
-  if (req.body.regularPrice) updateData.regularPrice = Number(req.body.regularPrice);
-  if (req.body.stock) updateData.stock = Number(req.body.stock);
-  if (req.body.weight) updateData.weight = Number(req.body.weight);
-
-  //  salePrice safe handling
-  if (req.body.salePrice) {
-    if (isNaN(Number(req.body.salePrice))) {
-      return res.status(400).json({
-        success: false,
-        message: "Sale price must be a valid number",
-      });
-    }
-    updateData.salePrice = Number(req.body.salePrice);
-  }
-
-  //  JSON parse
+const updateProduct = async (req: Request, res: Response) => {
   try {
-    if (req.body.tags) updateData.tags = JSON.parse(req.body.tags);
-    if (req.body.lowdown) updateData.lowdown = JSON.parse(req.body.lowdown);
-  } catch (err) {
-    return res.status(400).json({
+    const { id } = req.params;
+    const result = await ProductServices.updateProductIntoDB(id as string, req.body, req.files); // ProductServices থেকে call করুন
+
+    res.status(200).json({
+      success: true,
+      message: 'Product updated successfully!',
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(400).json({
       success: false,
-      message: "Invalid JSON format (tags/lowdown)",
+      message: error.message || 'Something went wrong',
     });
   }
+};
 
-  // ✅ Boolean fix
-  if (req.body.freeShipping !== undefined)
-    updateData.freeShipping = req.body.freeShipping === "true";
-
-  if (req.body.isFeatured !== undefined)
-    updateData.isFeatured = req.body.isFeatured === "true";
-
-  if (req.body.isNew !== undefined)
-    updateData.isNew = req.body.isNew === "true";
-
-  //  Thumbnail update (optional)
-  if (files?.thumbnail?.[0]) {
-    const result: any = await uploadToCloudinary(
-      files.thumbnail[0].buffer,
-      "glowly_products/thumbnails"
-    );
-    updateData.thumbnail = result.secure_url || result.url;
-  }
-
-  //  Images update (optional → overwrite)
-  if (files?.images?.length > 0) {
-    const uploadPromises = files.images.map((file) =>
-      uploadToCloudinary(file.buffer, "glowly_products/gallery")
-    );
-
-    const uploadResults: any[] = await Promise.all(uploadPromises);
-    updateData.images = uploadResults.map((res) => res.secure_url || res.url);
-  }
-
-  //  Service call
-  const result = await ProductServices.updateProductIntoDB(id as string, updateData);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: "Product updated successfully!",
-    data: result,
-  });
-});
 
 const getAllProducts = catchAsync(async (req: Request, res: Response) => {
   const result = await ProductServices.getAllProductsFromDB(req.query);

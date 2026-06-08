@@ -4,6 +4,378 @@ import { Order } from "../order/order.model";
 import slugify from "slugify";
 import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
 import { PipelineStage } from "mongoose";
+import cloudinary from "../../config/cloudinary";
+
+// const createProductIntoDB = async (body: Record<string, any>, files: any) => {
+//   const {
+//     name,
+//     shortDescription,
+//     description,
+//     costPrice,
+//     regularPrice,
+//     categoryID,
+//     stock,
+//     unit,
+//     productType,
+//   } = body;
+
+//   // ১. রিকোয়ার্ড ফিল্ড ভ্যালিডেশন
+//   if (
+//     !name ||
+//     !shortDescription ||
+//     !costPrice ||
+//     !regularPrice ||
+//     !categoryID ||
+//     stock === undefined ||
+//     !unit
+//   ) {
+//     throw new Error(
+//       "Please provide all required fields: name, shortDescription, costPrice, regularPrice, categoryID, stock, and unit.",
+//     );
+//   }
+
+//   const cost = Number(costPrice);
+//   const regular = Number(regularPrice);
+//   const qty = Number(stock);
+//   const sale = body.salePrice ? Number(body.salePrice) : undefined;
+
+//   if (cost <= 0 || regular <= 0) {
+//     throw new Error("Prices must be greater than zero.");
+//   }
+//   if (sale && sale >= regular) {
+//     throw new Error("Sale price must be less than regular price.");
+//   }
+
+//   // ২. JSON অ্যারে ও অবজেক্ট সেফ পার্সিং
+//   let tags: string[] = [];
+//   let lowdown: string[] = [];
+//   let variants: any[] = [];
+//   let comboItems: any[] = [];
+//   let specifications: any[] = [];
+
+//   try {
+//     if (body.tags) tags = JSON.parse(body.tags);
+//     if (body.lowdown) lowdown = JSON.parse(body.lowdown);
+//     if (body.variants) variants = JSON.parse(body.variants);
+//     if (body.comboItems) comboItems = JSON.parse(body.comboItems);
+//     if (body.specifications) specifications = JSON.parse(body.specifications);
+//   } catch (error) {
+//     throw new Error("Invalid JSON format for array or object fields.");
+//   }
+
+//   // ৩. 🔥 কম্বো বান্ডেল স্ট্রিক্ট স্টক ভ্যালিডেশন লজিক
+//   if (productType === "combo") {
+//     if (!comboItems || comboItems.length === 0) {
+//       throw new Error("A combo product must contain at least one valid item.");
+//     }
+
+//     for (const item of comboItems) {
+//       if (!item.productID) {
+//         throw new Error("Each combo item must have a valid productID.");
+//       }
+
+//       // ডাটাবেজ থেকে আসল প্রোডাক্ট খুঁজে বের করা
+//       const dbProduct = await Product.findById(item.productID);
+//       if (!dbProduct) {
+//         throw new Error(
+//           `Product with ID ${item.productID} not found in database.`,
+//         );
+//       }
+
+//       const requiredQty = Number(item.quantity || 1);
+//       let availableStock = 0;
+
+//       // ক) যদি কম্বো আইটেমটি নির্দিষ্ট ভ্যারিয়েন্টের হয়
+//       if (item.selectedVariant) {
+//         const targetVariant = dbProduct.variants?.find(
+//           (v: any) => v.variantName === item.selectedVariant,
+//         );
+
+//         if (!targetVariant) {
+//           throw new Error(
+//             `Variant "${item.selectedVariant}" not found for product "${dbProduct.name}".`,
+//           );
+//         }
+
+//         availableStock = Number(targetVariant.stock || 0);
+
+//         if (availableStock <= 0) {
+//           throw new Error(
+//             `Cannot create combo! Variant "${item.selectedVariant}" of product "${dbProduct.name}" is currently Out of Stock.`,
+//           );
+//         }
+
+//         if (requiredQty > availableStock) {
+//           throw new Error(
+//             `Cannot create combo! Requested quantity (${requiredQty}) for variant "${item.selectedVariant}" exceeds available database stock (${availableStock}) in "${dbProduct.name}".`,
+//           );
+//         }
+//       }
+//       // খ) যদি কোনো ভ্যারিয়েন্ট না থাকে (নরমাল বা বেস প্রোডাক্ট)
+//       else {
+//         availableStock = Number(dbProduct.stock || 0);
+
+//         if (availableStock <= 0) {
+//           throw new Error(
+//             `Cannot create combo! "${dbProduct.name}" is currently Out of Stock.`,
+//           );
+//         }
+
+//         if (requiredQty > availableStock) {
+//           throw new Error(
+//             `Cannot create combo! Requested quantity (${requiredQty}) for "${dbProduct.name}" exceeds available database stock (${availableStock}).`,
+//           );
+//         }
+//       }
+//     }
+//   }
+
+//   // ৪. ডাইমেনশন অবজেক্ট ফিক্স (টাইপস্ক্রিপ্ট সেফ)
+//   const dimensions =
+//     body.length || body.width || body.height
+//       ? {
+//           length: body.length ? Number(body.length) : undefined,
+//           width: body.width ? Number(body.width) : undefined,
+//           height: body.height ? Number(body.height) : undefined,
+//         }
+//       : undefined;
+
+//   // ৫. পেলোড অবজেক্ট তৈরি
+//   const productData: Partial<IProduct> = {
+//     name,
+//     shortDescription,
+//     description,
+//     categoryID,
+//     unit,
+//     productType: productType || "single",
+//     costPrice: cost,
+//     regularPrice: regular,
+//     salePrice: sale,
+//     stock: qty,
+//     sku: body.sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+//     lowStockAlert: body.lowStockAlert ? Number(body.lowStockAlert) : 10,
+//     brandID: body.brandID || "nonebrand", // 👈 এখানে brand এর জায়গায় brandID করা হয়েছে এবং ডিফল্ট nonebrand সেট করা হয়েছে
+//     tags,
+//     lowdown,
+//     variants,
+//     comboItems,
+//     specifications,
+//     weight: body.weight ? Number(body.weight) : undefined,
+//     shippingCost: body.shippingCost ? Number(body.shippingCost) : 0,
+//     freeShipping: body.freeShipping === "true",
+//     isFeatured: body.isFeatured === "true",
+//     isOnSale: body.isOnSale === "true",
+//     isNew: body.isNew !== "false",
+//     status: body.status || "active",
+//     metaTitle: body.metaTitle || "",
+//     metaDescription: body.metaDescription || "",
+//     dimensions,
+//   };
+
+//   // ৬. থাম্বনেইল ইমেজ আপলোড
+//   const thumbnailFiles = files?.thumbnail;
+//   if (thumbnailFiles && thumbnailFiles[0]) {
+//     const result: any = await uploadToCloudinary(
+//       thumbnailFiles[0].buffer,
+//       "glowly_products/thumbnails",
+//     );
+//     productData.thumbnail = result.secure_url || result.url;
+//   } else {
+//     throw new Error("Product thumbnail is required!");
+//   }
+
+//   // ७. গ্যালারি মাল্টিপল ইমেজ আপলোড
+//   const galleryFiles = files?.images;
+//   if (galleryFiles && galleryFiles.length > 0) {
+//     const uploadPromises = galleryFiles.map((file: any) =>
+//       uploadToCloudinary(file.buffer, "glowly_products/gallery"),
+//     );
+//     const uploadResults: any[] = await Promise.all(uploadPromises);
+//     productData.images = uploadResults.map((res) => res.secure_url || res.url);
+//   }
+
+//   // ৮. ডেটাবেজে ক্রিয়েট
+//   const result = await Product.create(productData);
+//   return result;
+// };
+
+
+// const updateProductIntoDB = async (
+//   id: string,
+//   body: Record<string, any>,
+//   files: any,
+// ) => {
+//   // ১. প্রোডাক্ট আছে কিনা চেক
+//   const existingProduct = await Product.findById(id);
+//   if (!existingProduct) {
+//     throw new Error("Product not found!");
+//   }
+
+//   // ২. JSON অ্যারে ও অবজেক্ট সেফ পার্সিং
+//   let tags = existingProduct.tags;
+//   let lowdown = existingProduct.lowdown;
+//   let variants = existingProduct.variants;
+//   let comboItems = existingProduct.comboItems;
+//   let specifications = existingProduct.specifications;
+
+//   try {
+//     if (body.tags) tags = JSON.parse(body.tags);
+//     if (body.lowdown) lowdown = JSON.parse(body.lowdown);
+//     if (body.variants) variants = JSON.parse(body.variants);
+//     if (body.comboItems) comboItems = JSON.parse(body.comboItems);
+//     if (body.specifications) specifications = JSON.parse(body.specifications);
+//   } catch (error) {
+//     throw new Error("Invalid JSON format for array or object fields.");
+//   }
+
+//   // ৩. কম্বো প্রোডাক্ট স্টক ভ্যালিডেশন
+//   const productType = body.productType || existingProduct.productType;
+//   if (productType === "combo" && body.comboItems) {
+//     if (!comboItems || comboItems.length === 0) {
+//       throw new Error("A combo product must contain at least one valid item.");
+//     }
+
+//     for (const item of comboItems) {
+//       if (!item.productID) {
+//         throw new Error("Each combo item must have a valid productID.");
+//       }
+
+//       const dbProduct = await Product.findById(item.productID);
+//       if (!dbProduct) {
+//         throw new Error(`Product with ID ${item.productID} not found.`);
+//       }
+
+//       const requiredQty = Number(item.quantity || 1);
+
+//       if (item.selectedVariant) {
+//         const targetVariant = dbProduct.variants?.find(
+//           (v: any) => v.variantName === item.selectedVariant,
+//         );
+//         if (!targetVariant) {
+//           throw new Error(
+//             `Variant "${item.selectedVariant}" not found for product "${dbProduct.name}".`,
+//           );
+//         }
+//         const availableStock = Number(targetVariant.stock || 0);
+//         if (availableStock <= 0) {
+//           throw new Error(
+//             `Variant "${item.selectedVariant}" of "${dbProduct.name}" is Out of Stock.`,
+//           );
+//         }
+//         if (requiredQty > availableStock) {
+//           throw new Error(
+//             `Requested quantity (${requiredQty}) for variant "${item.selectedVariant}" exceeds available stock (${availableStock}).`,
+//           );
+//         }
+//       } else {
+//         const availableStock = Number(dbProduct.stock || 0);
+//         if (availableStock <= 0) {
+//           throw new Error(`"${dbProduct.name}" is Out of Stock.`);
+//         }
+//         if (requiredQty > availableStock) {
+//           throw new Error(
+//             `Requested quantity (${requiredQty}) for "${dbProduct.name}" exceeds available stock (${availableStock}).`,
+//           );
+//         }
+//       }
+//     }
+//   }
+
+//   // ৪. ডাইমেনশন অবজেক্ট
+//   const dimensions =
+//     body.length || body.width || body.height
+//       ? {
+//           length: body.length ? Number(body.length) : existingProduct.dimensions?.length,
+//           width: body.width ? Number(body.width) : existingProduct.dimensions?.width,
+//           height: body.height ? Number(body.height) : existingProduct.dimensions?.height,
+//         }
+//       : existingProduct.dimensions;
+
+//   // ৫. আপডেট পেলোড তৈরি
+//   const updateData: Partial<IProduct> = {
+//     ...(body.name && { name: body.name }),
+//     ...(body.shortDescription && { shortDescription: body.shortDescription }),
+//     ...(body.description && { description: body.description }),
+//     ...(body.categoryID && { categoryID: body.categoryID }),
+//     ...(body.unit && { unit: body.unit }),
+//     ...(body.brandID && { brandID: body.brandID }),
+//     ...(body.productType && { productType: body.productType }),
+//     ...(body.costPrice && { costPrice: Number(body.costPrice) }),
+//     ...(body.regularPrice && { regularPrice: Number(body.regularPrice) }),
+//     ...(body.salePrice !== undefined && { salePrice: Number(body.salePrice) }),
+//     ...(body.stock !== undefined && { stock: Number(body.stock) }),
+//     ...(body.sku && { sku: body.sku }),
+//     ...(body.lowStockAlert !== undefined && { lowStockAlert: Number(body.lowStockAlert) }),
+//     ...(body.weight !== undefined && { weight: Number(body.weight) }),
+//     ...(body.shippingCost !== undefined && { shippingCost: Number(body.shippingCost) }),
+//     ...(body.shippingClass && { shippingClass: body.shippingClass }),
+//     ...(body.freeShipping !== undefined && { freeShipping: body.freeShipping === 'true' }),
+//     ...(body.isFeatured !== undefined && { isFeatured: body.isFeatured === 'true' }),
+//     ...(body.isOnSale !== undefined && { isOnSale: body.isOnSale === 'true' }),
+//     ...(body.isNew !== undefined && { isNew: body.isNew === 'true' }),
+//     ...(body.status && { status: body.status }),
+//     ...(body.metaTitle !== undefined && { metaTitle: body.metaTitle }),
+//     ...(body.metaDescription !== undefined && { metaDescription: body.metaDescription }),
+//     ...(body.straight_up !== undefined && { straight_up: body.straight_up }),
+//     tags,
+//     lowdown,
+//     variants,
+//     comboItems,
+//     specifications,
+//     dimensions,
+//   };
+
+//   // ৬. থাম্বনেইল আপডেট (নতুন ফাইল আসলে)
+//   const thumbnailFiles = files?.thumbnail;
+//   if (thumbnailFiles && thumbnailFiles[0]) {
+//     // পুরনো ছবি Cloudinary থেকে ডিলিট (optional)
+//     if (existingProduct.thumbnail) {
+//       const publicId = existingProduct.thumbnail
+//         .split('/')
+//         .slice(-2)
+//         .join('/')
+//         .replace(/\.[^/.]+$/, '');
+//       await cloudinary.uploader.destroy(publicId);
+//     }
+//     const result: any = await uploadToCloudinary(
+//       thumbnailFiles[0].buffer,
+//       'glowly_products/thumbnails',
+//     );
+//     updateData.thumbnail = result.secure_url || result.url;
+//   }
+
+//   // ৭. গ্যালারি ইমেজ আপডেট (নতুন ফাইল আসলে)
+//   const galleryFiles = files?.images;
+//   if (galleryFiles && galleryFiles.length > 0) {
+//     // পুরনো ছবিগুলো ডিলিট (optional)
+//     if (existingProduct.images && existingProduct.images.length > 0) {
+//       await Promise.all(
+//         existingProduct.images.map((imgUrl: string) => {
+//           const publicId = imgUrl
+//             .split('/')
+//             .slice(-2)
+//             .join('/')
+//             .replace(/\.[^/.]+$/, '');
+//           return cloudinary.uploader.destroy(publicId);
+//         }),
+//       );
+//     }
+//     const uploadPromises = galleryFiles.map((file: any) =>
+//       uploadToCloudinary(file.buffer, 'glowly_products/gallery'),
+//     );
+//     const uploadResults: any[] = await Promise.all(uploadPromises);
+//     updateData.images = uploadResults.map((res) => res.secure_url || res.url);
+//   }
+
+//   // ৮. ডাটাবেজ আপডেট
+//   const updatedProduct = await Product.findByIdAndUpdate(
+//     id,
+//     { $set: updateData },
+//     { new: true, runValidators: true },
+//   ).populate('categoryID', 'name image');
+
+//   return updatedProduct;
+// };
 
 const createProductIntoDB = async (body: Record<string, any>, files: any) => {
   const {
@@ -11,58 +383,75 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     shortDescription,
     description,
     costPrice,
-    regularPrice,
     categoryID,
     stock,
     unit,
     productType,
   } = body;
 
-  // ১. রিকোয়ার্ড ফিল্ড ভ্যালিডেশন
-  if (
-    !name ||
-    !shortDescription ||
-    !costPrice ||
-    !regularPrice ||
-    !categoryID ||
-    stock === undefined ||
-    !unit
-  ) {
-    throw new Error(
-      "Please provide all required fields: name, shortDescription, costPrice, regularPrice, categoryID, stock, and unit.",
-    );
+  // ১. আগে variants parse করো
+  let variants: any[] = [];
+  try {
+    if (body.variants) variants = JSON.parse(body.variants);
+  } catch (error) {
+    throw new Error("Invalid JSON format for variants.");
   }
 
-  const cost = Number(costPrice);
-  const regular = Number(regularPrice);
-  const qty = Number(stock);
+  const hasVariants = variants && variants.length > 0;
+
+  // ২. Required field validation
+  if (!name || !shortDescription || !categoryID || !unit) {
+    throw new Error("Please provide all required fields: name, shortDescription, categoryID, and unit.");
+  }
+
+  // variant না থাকলে regularPrice এবং stock required
+  if (!hasVariants) {
+    if (!body.regularPrice) throw new Error("Regular price is required for non-variant products.");
+    if (stock === undefined) throw new Error("Stock is required for non-variant products.");
+  }
+
+  const cost = Number(costPrice) || 0;
+  const regular = hasVariants
+    ? Number(variants[0]?.regularPrice || 0)
+    : Number(body.regularPrice);
+  const qty = hasVariants
+    ? variants.reduce((total: number, v: any) => total + Number(v.stock || 0), 0)
+    : Number(stock);
   const sale = body.salePrice ? Number(body.salePrice) : undefined;
 
-  if (cost <= 0 || regular <= 0) {
-    throw new Error("Prices must be greater than zero.");
-  }
-  if (sale && sale >= regular) {
-    throw new Error("Sale price must be less than regular price.");
+  // ৩. Price validation — variant থাকলে base price check করবে না
+  if (!hasVariants) {
+    if (cost <= 0 || regular <= 0) {
+      throw new Error("Prices must be greater than zero.");
+    }
+    if (sale && sale >= regular) {
+      throw new Error("Sale price must be less than regular price.");
+    }
+  } else {
+    // variant এর price validate করো
+    for (const variant of variants) {
+      if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
+        throw new Error(`Variant "${variant.variantName}" এর Regular Price must be greater than zero.`);
+      }
+    }
   }
 
-  // ২. JSON অ্যারে ও অবজেক্ট সেফ পার্সিং
+  // ৪. বাকি JSON parse
   let tags: string[] = [];
   let lowdown: string[] = [];
-  let variants: any[] = [];
   let comboItems: any[] = [];
   let specifications: any[] = [];
 
   try {
     if (body.tags) tags = JSON.parse(body.tags);
     if (body.lowdown) lowdown = JSON.parse(body.lowdown);
-    if (body.variants) variants = JSON.parse(body.variants);
     if (body.comboItems) comboItems = JSON.parse(body.comboItems);
     if (body.specifications) specifications = JSON.parse(body.specifications);
   } catch (error) {
     throw new Error("Invalid JSON format for array or object fields.");
   }
 
-  // ৩. 🔥 কম্বো বান্ডেল স্ট্রিক্ট স্টক ভ্যালিডেশন লজিক
+  // ৫. Combo validation
   if (productType === "combo") {
     if (!comboItems || comboItems.length === 0) {
       throw new Error("A combo product must contain at least one valid item.");
@@ -73,63 +462,40 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
         throw new Error("Each combo item must have a valid productID.");
       }
 
-      // ডাটাবেজ থেকে আসল প্রোডাক্ট খুঁজে বের করা
       const dbProduct = await Product.findById(item.productID);
       if (!dbProduct) {
-        throw new Error(
-          `Product with ID ${item.productID} not found in database.`,
-        );
+        throw new Error(`Product with ID ${item.productID} not found in database.`);
       }
 
       const requiredQty = Number(item.quantity || 1);
-      let availableStock = 0;
 
-      // ক) যদি কম্বো আইটেমটি নির্দিষ্ট ভ্যারিয়েন্টের হয়
       if (item.selectedVariant) {
         const targetVariant = dbProduct.variants?.find(
           (v: any) => v.variantName === item.selectedVariant,
         );
-
         if (!targetVariant) {
-          throw new Error(
-            `Variant "${item.selectedVariant}" not found for product "${dbProduct.name}".`,
-          );
+          throw new Error(`Variant "${item.selectedVariant}" not found for product "${dbProduct.name}".`);
         }
-
-        availableStock = Number(targetVariant.stock || 0);
-
+        const availableStock = Number(targetVariant.stock || 0);
         if (availableStock <= 0) {
-          throw new Error(
-            `Cannot create combo! Variant "${item.selectedVariant}" of product "${dbProduct.name}" is currently Out of Stock.`,
-          );
+          throw new Error(`Cannot create combo! Variant "${item.selectedVariant}" of product "${dbProduct.name}" is currently Out of Stock.`);
         }
-
         if (requiredQty > availableStock) {
-          throw new Error(
-            `Cannot create combo! Requested quantity (${requiredQty}) for variant "${item.selectedVariant}" exceeds available database stock (${availableStock}) in "${dbProduct.name}".`,
-          );
+          throw new Error(`Cannot create combo! Requested quantity (${requiredQty}) for variant "${item.selectedVariant}" exceeds available stock (${availableStock}) in "${dbProduct.name}".`);
         }
-      }
-      // খ) যদি কোনো ভ্যারিয়েন্ট না থাকে (নরমাল বা বেস প্রোডাক্ট)
-      else {
-        availableStock = Number(dbProduct.stock || 0);
-
+      } else {
+        const availableStock = Number(dbProduct.stock || 0);
         if (availableStock <= 0) {
-          throw new Error(
-            `Cannot create combo! "${dbProduct.name}" is currently Out of Stock.`,
-          );
+          throw new Error(`Cannot create combo! "${dbProduct.name}" is currently Out of Stock.`);
         }
-
         if (requiredQty > availableStock) {
-          throw new Error(
-            `Cannot create combo! Requested quantity (${requiredQty}) for "${dbProduct.name}" exceeds available database stock (${availableStock}).`,
-          );
+          throw new Error(`Cannot create combo! Requested quantity (${requiredQty}) for "${dbProduct.name}" exceeds available stock (${availableStock}).`);
         }
       }
     }
   }
 
-  // ৪. ডাইমেনশন অবজেক্ট ফিক্স (টাইপস্ক্রিপ্ট সেফ)
+  // ৬. Dimensions
   const dimensions =
     body.length || body.width || body.height
       ? {
@@ -139,7 +505,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
         }
       : undefined;
 
-  // ৫. পেলোড অবজেক্ট তৈরি
+  // ৭. Payload
   const productData: Partial<IProduct> = {
     name,
     shortDescription,
@@ -153,7 +519,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     stock: qty,
     sku: body.sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     lowStockAlert: body.lowStockAlert ? Number(body.lowStockAlert) : 10,
-    brandID: body.brandID || "nonebrand", // 👈 এখানে brand এর জায়গায় brandID করা হয়েছে এবং ডিফল্ট nonebrand সেট করা হয়েছে
+    brandID: body.brandID || "nonebrand",
     tags,
     lowdown,
     variants,
@@ -171,93 +537,226 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     dimensions,
   };
 
-  // ৬. থাম্বনেইল ইমেজ আপলোড
+  // ৮. Thumbnail upload
   const thumbnailFiles = files?.thumbnail;
   if (thumbnailFiles && thumbnailFiles[0]) {
-    const result: any = await uploadToCloudinary(
-      thumbnailFiles[0].buffer,
-      "glowly_products/thumbnails",
-    );
+    const result: any = await uploadToCloudinary(thumbnailFiles[0].buffer, "glowly_products/thumbnails");
     productData.thumbnail = result.secure_url || result.url;
   } else {
     throw new Error("Product thumbnail is required!");
   }
 
-  // ७. গ্যালারি মাল্টিপল ইমেজ আপলোড
+  // ৯. Gallery upload
   const galleryFiles = files?.images;
   if (galleryFiles && galleryFiles.length > 0) {
-    const uploadPromises = galleryFiles.map((file: any) =>
-      uploadToCloudinary(file.buffer, "glowly_products/gallery"),
+    const uploadResults: any[] = await Promise.all(
+      galleryFiles.map((file: any) => uploadToCloudinary(file.buffer, "glowly_products/gallery")),
     );
-    const uploadResults: any[] = await Promise.all(uploadPromises);
     productData.images = uploadResults.map((res) => res.secure_url || res.url);
   }
 
-  // ৮. ডেটাবেজে ক্রিয়েট
   const result = await Product.create(productData);
   return result;
 };
 
-const updateProductIntoDB = async (id: string, payload: any) => {
-  const product = await Product.findById(id);
 
-  if (!product) {
-    throw new Error("Product not found");
+// ===================== UPDATE SERVICE =====================
+const updateProductIntoDB = async (id: string, body: Record<string, any>, files: any) => {
+  // ১. Product exists চেক
+  const existingProduct = await Product.findById(id);
+  if (!existingProduct) {
+    throw new Error("Product not found!");
   }
 
-  // ১. JSON ফিল্ডগুলো পার্স করা (FormData থেকে স্ট্রিং হিসেবে আসলে)
-  const jsonFields = ['specifications', 'variants', 'comboItems', 'tags', 'lowdown'];
-  for (const field of jsonFields) {
-    if (payload[field] && typeof payload[field] === 'string') {
-      try {
-        payload[field] = JSON.parse(payload[field]);
-      } catch (err) {
-        throw new Error(`Invalid JSON format for field: ${field}`);
+  // ২. আগে variants parse করো
+  // let variants = existingProduct.variants;
+  // try {
+  //   if (body.variants) variants = JSON.parse(body.variants);
+  // } catch (error) {
+  //   throw new Error("Invalid JSON format for variants.");
+  // }
+  // ২. আগে variants parse করো
+let variants: any[] = (existingProduct.variants ?? []) as any[];
+try {
+    if (body.variants) variants = JSON.parse(body.variants);
+} catch (error) {
+    throw new Error("Invalid JSON format for variants.");
+}
+
+  const hasVariants = variants && variants.length > 0;
+
+  // ৩. Price validation
+  if (body.regularPrice || body.costPrice) {
+    if (!hasVariants) {
+      const cost = Number(body.costPrice || existingProduct.costPrice);
+      const regular = Number(body.regularPrice || existingProduct.regularPrice);
+      const sale = body.salePrice !== undefined ? Number(body.salePrice) : existingProduct.salePrice;
+
+      if (cost <= 0 || regular <= 0) {
+        throw new Error("Prices must be greater than zero.");
+      }
+      if (sale && sale >= regular) {
+        throw new Error("Sale price must be less than regular price.");
+      }
+    } else {
+      for (const variant of variants) {
+        if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
+          throw new Error(`Variant "${variant.variantName}" এর Regular Price must be greater than zero.`);
+        }
       }
     }
   }
 
-  // ২. নাম্বার ফিল্ডগুলোকে নিরাপদ করা (NaN এরর রোধ করতে)
-  const numericFields = ['weight', 'salePrice', 'regularPrice', 'costPrice', 'stock', 'shippingCost', 'lowStockAlert'];
-  
-  numericFields.forEach(field => {
-    if (payload[field] !== undefined && payload[field] !== null && payload[field] !== '') {
-      const parsedValue = Number(payload[field]);
-      if (isNaN(parsedValue)) {
-        throw new Error(`${field} must be a valid number`);
-      }
-      payload[field] = parsedValue;
-    } else if (payload[field] === '') {
-      // যদি খালি স্ট্রিং পাঠানো হয় তবে সেটি ডিলিট করে দিন
-      delete payload[field];
+  // ৪. বাকি JSON parse
+  let tags = existingProduct.tags;
+  let lowdown = existingProduct.lowdown;
+  let comboItems = existingProduct.comboItems;
+  let specifications = existingProduct.specifications;
+
+  try {
+    if (body.tags) tags = JSON.parse(body.tags);
+    if (body.lowdown) lowdown = JSON.parse(body.lowdown);
+    if (body.comboItems) comboItems = JSON.parse(body.comboItems);
+    if (body.specifications) specifications = JSON.parse(body.specifications);
+  } catch (error) {
+    throw new Error("Invalid JSON format for array or object fields.");
+  }
+
+  // ৫. Combo validation
+  const productType = body.productType || existingProduct.productType;
+  if (productType === "combo" && body.comboItems) {
+    if (!comboItems || comboItems.length === 0) {
+      throw new Error("A combo product must contain at least one valid item.");
     }
-  });
 
-  // ৩. ডাইমেনশন অবজেক্ট হ্যান্ডেল করা
-  if (payload.dimensions && typeof payload.dimensions === 'string') {
-    payload.dimensions = JSON.parse(payload.dimensions);
+    for (const item of comboItems) {
+      if (!item.productID) {
+        throw new Error("Each combo item must have a valid productID.");
+      }
+
+      const dbProduct = await Product.findById(item.productID);
+      if (!dbProduct) {
+        throw new Error(`Product with ID ${item.productID} not found.`);
+      }
+
+      const requiredQty = Number(item.quantity || 1);
+
+      if (item.selectedVariant) {
+        const targetVariant = dbProduct.variants?.find(
+          (v: any) => v.variantName === item.selectedVariant,
+        );
+        if (!targetVariant) {
+          throw new Error(`Variant "${item.selectedVariant}" not found for product "${dbProduct.name}".`);
+        }
+        const availableStock = Number(targetVariant.stock || 0);
+        if (availableStock <= 0) {
+          throw new Error(`Variant "${item.selectedVariant}" of "${dbProduct.name}" is Out of Stock.`);
+        }
+        if (requiredQty > availableStock) {
+          throw new Error(`Requested quantity (${requiredQty}) for variant "${item.selectedVariant}" exceeds available stock (${availableStock}).`);
+        }
+      } else {
+        const availableStock = Number(dbProduct.stock || 0);
+        if (availableStock <= 0) {
+          throw new Error(`"${dbProduct.name}" is Out of Stock.`);
+        }
+        if (requiredQty > availableStock) {
+          throw new Error(`Requested quantity (${requiredQty}) for "${dbProduct.name}" exceeds available stock (${availableStock}).`);
+        }
+      }
+    }
   }
 
-  // ৪. লজিক্যাল ভ্যালিডেশন
-  if (payload.salePrice && payload.regularPrice && payload.salePrice >= payload.regularPrice) {
-    throw new Error("Sale price must be less than regular price");
+  // ৬. Dimensions
+  const dimensions =
+    body.length || body.width || body.height
+      ? {
+          length: body.length ? Number(body.length) : existingProduct.dimensions?.length,
+          width: body.width ? Number(body.width) : existingProduct.dimensions?.width,
+          height: body.height ? Number(body.height) : existingProduct.dimensions?.height,
+        }
+      : existingProduct.dimensions;
+
+  // ৭. Update payload — variant থাকলে stock ও price auto set
+  const updateData: Partial<IProduct> = {
+    ...(body.name && { name: body.name }),
+    ...(body.shortDescription && { shortDescription: body.shortDescription }),
+    ...(body.description && { description: body.description }),
+    ...(body.categoryID && { categoryID: body.categoryID }),
+    ...(body.unit && { unit: body.unit }),
+    ...(body.brandID && { brandID: body.brandID }),
+    ...(body.productType && { productType: body.productType }),
+    ...(body.costPrice && { costPrice: Number(body.costPrice) }),
+    // ✅ variant থাকলে first variant এর price নাও, না থাকলে body থেকে নাও
+    regularPrice: hasVariants
+      ? Number(variants[0]?.regularPrice || existingProduct.regularPrice)
+      : (body.regularPrice ? Number(body.regularPrice) : existingProduct.regularPrice),
+    // ✅ variant থাকলে total stock auto calculate
+    stock: hasVariants
+      ? variants.reduce((total: number, v: any) => total + Number(v.stock || 0), 0)
+      : (body.stock !== undefined ? Number(body.stock) : existingProduct.stock),
+    ...(body.salePrice !== undefined && { salePrice: Number(body.salePrice) }),
+    ...(body.sku && { sku: body.sku }),
+    ...(body.lowStockAlert !== undefined && { lowStockAlert: Number(body.lowStockAlert) }),
+    ...(body.weight !== undefined && { weight: Number(body.weight) }),
+    ...(body.shippingCost !== undefined && { shippingCost: Number(body.shippingCost) }),
+    ...(body.shippingClass && { shippingClass: body.shippingClass }),
+    ...(body.freeShipping !== undefined && { freeShipping: body.freeShipping === 'true' }),
+    ...(body.isFeatured !== undefined && { isFeatured: body.isFeatured === 'true' }),
+    ...(body.isOnSale !== undefined && { isOnSale: body.isOnSale === 'true' }),
+    ...(body.isNew !== undefined && { isNew: body.isNew === 'true' }),
+    ...(body.status && { status: body.status }),
+    ...(body.metaTitle !== undefined && { metaTitle: body.metaTitle }),
+    ...(body.metaDescription !== undefined && { metaDescription: body.metaDescription }),
+    ...(body.straight_up !== undefined && { straight_up: body.straight_up }),
+    tags,
+    lowdown,
+    variants,
+    comboItems,
+    specifications,
+    dimensions,
+  };
+
+  // ৮. Thumbnail update
+  const thumbnailFiles = files?.thumbnail;
+  if (thumbnailFiles && thumbnailFiles[0]) {
+    if (existingProduct.thumbnail) {
+      const publicId = existingProduct.thumbnail
+        .split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
+      await cloudinary.uploader.destroy(publicId);
+    }
+    const result: any = await uploadToCloudinary(thumbnailFiles[0].buffer, 'glowly_products/thumbnails');
+    updateData.thumbnail = result.secure_url || result.url;
   }
 
-  // ৫. ডিসকাউন্ট অটো ক্যালকুলেশন
-  if (payload.regularPrice && payload.salePrice) {
-    payload.discountPercent = Math.round(
-      ((payload.regularPrice - payload.salePrice) / payload.regularPrice) * 100
+  // ৯. Gallery update
+  const galleryFiles = files?.images;
+  if (galleryFiles && galleryFiles.length > 0) {
+    if (existingProduct.images && existingProduct.images.length > 0) {
+      await Promise.all(
+        existingProduct.images.map((imgUrl: string) => {
+          const publicId = imgUrl.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
+          return cloudinary.uploader.destroy(publicId);
+        }),
+      );
+    }
+    const uploadResults: any[] = await Promise.all(
+      galleryFiles.map((file: any) => uploadToCloudinary(file.buffer, 'glowly_products/gallery')),
     );
+    updateData.images = uploadResults.map((res) => res.secure_url || res.url);
   }
 
-  // ৬. আপডেট অপারেশন
-  const updated = await Product.findByIdAndUpdate(id, payload, {
-    new: true,
-    runValidators: true,
-  });
+  const updatedProduct = await Product.findByIdAndUpdate(
+    id,
+    { $set: updateData },
+    { new: true, runValidators: true },
+  ).populate('categoryID', 'name image');
 
-  return updated;
+  return updatedProduct;
 };
+
+
+
 
 export const getNewProductsService = async (params: GetProductsParams) => {
   const { isNew, limit } = params;
