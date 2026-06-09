@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  getProductsController,
+ 
   ProductControllers,
 } from "./product.controller";
 import { isAuthenticated, isAdmin } from "../../middlewares/auth.middleware";
@@ -32,12 +32,7 @@ router.patch(
 
 router.get("/", ProductControllers.getAllProducts);
 
-/**
- * GET /api/products
- * GET /api/products?isNew=true
- * GET /api/products?limit=4
- */
-router.get("/newProducts", getProductsController);
+
 
 router.delete(
   "/:id",

@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import catchAsync from "../../utils/catchAsync";
 import sendResponse from "../../utils/sendResponse";
-import { getNewProductsService, ProductServices } from "./product.service";
+import {  ProductServices } from "./product.service";
 import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
 import { Product } from "./product.model";
 import { deleteFromCloudinary } from "../../utils/deleteFromCloudinary";
@@ -52,25 +52,7 @@ const getAllProducts = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-export const getProductsController = async (req: Request, res: Response) => {
-  try {
-    const products = await getNewProductsService({
-      isNew: req.query.isNew as string,
-      limit: req.query.limit ? Number(req.query.limit) : undefined,
-    });
 
-    res.status(200).json({
-      success: true,
-      message: "Products fetched successfully",
-      data: products,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
-  }
-};
 
 const getSingleProduct = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params;

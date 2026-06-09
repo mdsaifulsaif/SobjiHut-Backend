@@ -54,6 +54,7 @@ const productSchema = new Schema<IProduct>(
             ref: "Unit",
             required: true,
           },
+          costPrice: { type: Number, min: 0, default: 0 },
           regularPrice: { type: Number, required: true, min: 0 },
           salePrice: { type: Number, min: 0 },
           stock: { type: Number, required: true, default: 0, min: 0 },
@@ -166,5 +167,6 @@ productSchema.pre("save", async function () {
     }
   }
 });
+
 
 export const Product = model<IProduct>("Product", productSchema);

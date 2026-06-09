@@ -43,33 +43,51 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
   }
 
   // ৩. variant validation
+  // if (hasVariants) {
+  //   const seen = new Set<string>();
+
+  //   for (const variant of variants) {
+  //     // unitID required
+  //     if (!variant.unitID) {
+  //       throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
+  //     }
+  //     // regularPrice required
+  //     if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
+  //       throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
+  //     }
+  //     // weightOrVolume required
+  //     if (
+  //       variant.weightOrVolume === undefined ||
+  //       variant.weightOrVolume === null
+  //     ) {
+  //       throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
+  //     }
+
+  //     // ✅ Duplicate unitID + weightOrVolume check
+  //     const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
+  //     if (seen.has(key)) {
+  //       throw new Error(
+  //         `Duplicate variant: unitID "${variant.unitID}" তে weightOrVolume "${variant.weightOrVolume}" ইতিমধ্যে আছে।`,
+  //       );
+  //     }
+  //     seen.add(key);
+  //   }
+  // }
   if (hasVariants) {
     const seen = new Set<string>();
-
     for (const variant of variants) {
-      // unitID required
-      if (!variant.unitID) {
+      if (!variant.unitID)
         throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
-      }
-      // regularPrice required
-      if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
+      if (!variant.regularPrice || Number(variant.regularPrice) <= 0)
         throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
-      }
-      // weightOrVolume required
       if (
         variant.weightOrVolume === undefined ||
         variant.weightOrVolume === null
-      ) {
+      )
         throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
-      }
 
-      // ✅ Duplicate unitID + weightOrVolume check
       const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
-      if (seen.has(key)) {
-        throw new Error(
-          `Duplicate variant: unitID "${variant.unitID}" তে weightOrVolume "${variant.weightOrVolume}" ইতিমধ্যে আছে।`,
-        );
-      }
+      if (seen.has(key)) throw new Error(`Duplicate variant found.`);
       seen.add(key);
     }
   }
@@ -152,6 +170,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
       : undefined;
 
   // ৭. payload
+  // ৭. payload
   const productData: Partial<IProduct> = {
     name,
     shortDescription,
@@ -159,7 +178,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     categoryID,
     unit,
     productType: productType || "single",
-    costPrice: cost,
+    costPrice: hasVariants ? 0 : cost, // ✅ একবারই থাকবে
     regularPrice: regular,
     salePrice: sale,
     stock: qty,
@@ -232,36 +251,27 @@ const updateProductIntoDB = async (
   // ২. variant validation
   if (hasVariants) {
     const seen = new Set<string>();
-
     for (const variant of variants) {
-      // unitID required
-      if (!variant.unitID) {
+      if (!variant.unitID)
         throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
-      }
-      // regularPrice required
-      if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
+      if (!variant.regularPrice || Number(variant.regularPrice) <= 0)
         throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
-      }
-      // weightOrVolume required
       if (
         variant.weightOrVolume === undefined ||
         variant.weightOrVolume === null
-      ) {
+      )
         throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
-      }
 
-      // ✅ Duplicate unitID + weightOrVolume check
       const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
-      if (seen.has(key)) {
+      if (seen.has(key))
         throw new Error(
           `Duplicate variant: unitID "${variant.unitID}" তে weightOrVolume "${variant.weightOrVolume}" ইতিমধ্যে আছে।`,
         );
-      }
       seen.add(key);
     }
   }
 
-  // ৩. price validation (single product)
+  // ৩. price validation (single product only)
   if (!hasVariants && (body.regularPrice || body.costPrice)) {
     const cost = Number(body.costPrice || existingProduct.costPrice);
     const regular = Number(body.regularPrice || existingProduct.regularPrice);
@@ -269,6 +279,7 @@ const updateProductIntoDB = async (
       body.salePrice !== undefined
         ? Number(body.salePrice)
         : existingProduct.salePrice;
+
     if (cost <= 0 || regular <= 0)
       throw new Error("Prices must be greater than zero.");
     if (sale && sale >= regular)
@@ -334,16 +345,22 @@ const updateProductIntoDB = async (
     ...(body.unit && { unit: body.unit }),
     ...(body.brandID && { brandID: body.brandID }),
     ...(body.productType && { productType: body.productType }),
-    ...(body.costPrice && { costPrice: Number(body.costPrice) }),
 
-    // variant থাকলে first variant এর price, না থাকলে body থেকে
+    // ✅ variant থাকলে costPrice 0, না থাকলে body থেকে নাও
+    costPrice: hasVariants
+      ? 0
+      : body.costPrice
+        ? Number(body.costPrice)
+        : existingProduct.costPrice,
+
+    // ✅ variant থাকলে first variant এর price, না থাকলে body থেকে
     regularPrice: hasVariants
       ? Number(variants[0]?.regularPrice || existingProduct.regularPrice)
       : body.regularPrice
         ? Number(body.regularPrice)
         : existingProduct.regularPrice,
 
-    // variant থাকলে total stock, না থাকলে body থেকে
+    // ✅ variant থাকলে total stock auto calculate
     stock: hasVariants
       ? variants.reduce(
           (total: number, v: any) => total + Number(v.stock || 0),
@@ -353,13 +370,21 @@ const updateProductIntoDB = async (
         ? Number(body.stock)
         : existingProduct.stock,
 
-    // single product এর weightOrVolume
+    // ✅ single product এর weightOrVolume
     ...(!hasVariants &&
       body.weightOrVolume && {
         weightOrVolume: Number(body.weightOrVolume),
       }),
 
-    ...(body.salePrice !== undefined && { salePrice: Number(body.salePrice) }),
+    // ✅ variant থাকলে salePrice first variant থেকে, না থাকলে body থেকে
+    salePrice: hasVariants
+      ? variants[0]?.salePrice
+        ? Number(variants[0].salePrice)
+        : undefined
+      : body.salePrice !== undefined
+        ? Number(body.salePrice)
+        : existingProduct.salePrice,
+
     ...(body.sku && { sku: body.sku }),
     ...(body.lowStockAlert !== undefined && {
       lowStockAlert: Number(body.lowStockAlert),
@@ -439,24 +464,7 @@ const updateProductIntoDB = async (
   ).populate("categoryID", "name image");
 };
 
-export const getNewProductsService = async (params: GetProductsParams) => {
-  const { isNew, limit } = params;
 
-  // max 4 enforce
-  const safeLimit = Math.min(Number(limit) || 4, 4);
-
-  const filter: any = {};
-
-  if (isNew === "true") {
-    filter.isNew = true;
-  }
-
-  const products = await Product.find(filter)
-    .limit(safeLimit)
-    .sort({ createdAt: -1 });
-
-  return products;
-};
 
 const getAllProductsFromDB = async (query: Record<string, any>) => {
   const {
@@ -467,11 +475,13 @@ const getAllProductsFromDB = async (query: Record<string, any>) => {
     isFeatured,
     page = 1,
     limit = 8,
+    
     sort = "-createdAt",
   } = query;
 
   const pageNum = Number(page);
   const limitNum = Number(limit);
+  const safeLimit = limitNum > 0 ? limitNum : 10; 
 
   const matchStage: any = {};
   if (searchTerm) {
@@ -596,6 +606,5 @@ export const ProductServices = {
   deleteProductFromDB,
   getRelatedProductsFromDB,
   updateProductIntoDB,
-  getNewProductsService,
   getLowStockProductsFromDB,
 };
