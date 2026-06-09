@@ -1,13 +1,13 @@
-import { Types } from "mongoose";
-
 export interface GetProductsParams {
   isNew?: string;
   limit?: number;
 }
 
+import { Types } from "mongoose";
+
 export interface IProductVariant {
   _id?: string;
-  // variantName সরানো হয়েছে — unitID populate করে name আনা হবে
+  variantName?: string;
   weightOrVolume: number;
   unitID: Types.ObjectId | string;
   regularPrice: number;
@@ -19,7 +19,7 @@ export interface IProductVariant {
 export interface IComboItem {
   productID: Types.ObjectId | string;
   quantity: number;
-  selectedVariant?: Types.ObjectId | string; // variant এর _id
+  selectedVariant?: string;
 }
 
 export interface ISpecification {
@@ -45,7 +45,7 @@ export interface IProduct {
   discountPercent?: number;
   stock: number;
   reservedStock?: number;
-  availableStock?: number; // virtual
+  availableStock?: number;
   sku?: string;
   lowStockAlert?: number;
   thumbnail: string;
@@ -57,9 +57,9 @@ export interface IProduct {
   numReviews?: number;
   status: "active" | "inactive" | "draft";
   productType: "single" | "combo";
-  unit: Types.ObjectId | string; // single product এর unit
-  weightOrVolume?: number; // single product এর weight/volume
-  variants?: IProductVariant[];
+  unit: Types.ObjectId | string;
+  weightOrVolume?: number; // 👈 single product এর জন্য
+  variants?: IProductVariant[]; // 👈 IProductVariant use করছে
   comboItems?: IComboItem[];
   specifications?: ISpecification[];
   isFeatured: boolean;
