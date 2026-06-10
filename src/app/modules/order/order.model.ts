@@ -10,6 +10,7 @@ const orderItemSchema = new Schema<IOrderItem>(
     sku: { type: String },
     quantity: { type: Number, required: true, min: 1 },
     unit: { type: String, required: true },
+    weightOrVolume: { type: Number },
     unitPrice: { type: Number, required: true, min: 0 },
     salePrice: { type: Number, min: 0 },
     totalPrice: { type: Number, required: true, min: 0 },

@@ -20,13 +20,12 @@ const productSchema = new Schema<IProduct>(
     },
     tags: [{ type: String, trim: true }],
 
-    costPrice: { type: Number, required: true, min: 0 },
-    regularPrice: { type: Number, required: true, min: 0 },
+    costPrice: { type: Number, required: false, min: 0, default: 0 }, // ✅
+    regularPrice: { type: Number, required: false, min: 0, default: 0 }, // ✅
     salePrice: { type: Number, min: 0 },
     discountPercent: { type: Number, default: 0, min: 0, max: 100 },
-    // stock: { type: Number, required: true, default: 0, min: 0 },
     stock: { type: Number, required: true, default: 0, min: 0 },
-    reservedStock: { type: Number, default: 0, min: 0 }, // 👈 এটা add করো
+    reservedStock: { type: Number, default: 0, min: 0 },
     sku: { type: String, unique: true, sparse: true, trim: true },
     lowStockAlert: { type: Number, default: 10, min: 0 },
 
@@ -35,16 +34,26 @@ const productSchema = new Schema<IProduct>(
       enum: ["single", "combo"],
       default: "single",
     },
+
+    // ✅ unit — required false (variant/combo তে লাগে না)
     unit: {
       type: Schema.Types.ObjectId,
-      ref: "Unit", // 👈 আপনার তৈরি করা Unit কালেকশনকে রেফার করছে
-      required: true,
+      ref: "Unit",
+      required: false,
+      default: null,
     },
+    weightOrVolume: { type: Number, min: 0 },
+
     variants: {
       type: [
         {
-          variantName: { type: String, required: true, trim: true },
           weightOrVolume: { type: Number, required: true, min: 0 },
+          unitID: {
+            type: Schema.Types.ObjectId,
+            ref: "Unit",
+            required: true,
+          },
+          costPrice: { type: Number, min: 0, default: 0 },
           regularPrice: { type: Number, required: true, min: 0 },
           salePrice: { type: Number, min: 0 },
           stock: { type: Number, required: true, default: 0, min: 0 },
@@ -63,6 +72,10 @@ const productSchema = new Schema<IProduct>(
             required: true,
           },
           quantity: { type: Number, default: 1, min: 1 },
+          selectedVariant: {
+            type: Schema.Types.ObjectId,
+            default: null,
+          },
         },
       ],
       default: [],
@@ -103,25 +116,20 @@ const productSchema = new Schema<IProduct>(
 
     metaTitle: { type: String, trim: true, default: "" },
     metaDescription: { type: String, trim: true, default: "" },
-
     rating: { type: Number, default: 0, min: 0, max: 5 },
     numReviews: { type: Number, default: 0, min: 0 },
-
     straight_up: { type: String, trim: true },
     lowdown: [{ type: String, trim: true }],
   },
-  {
-    timestamps: true,
-  },
+  { timestamps: true },
 );
 
 productSchema.virtual("availableStock").get(function () {
   return this.stock - (this.reservedStock || 0);
 });
 
-//  ডাটাবেজে সেভ হওয়ার আগের অটোমেশন লজিক
 productSchema.pre("save", async function () {
-  // ১. স্লাগ অটো-জেনারেশন
+  // slug auto generate
   if (!this.slug && this.name) {
     this.slug = this.name
       .toLowerCase()
@@ -129,7 +137,7 @@ productSchema.pre("save", async function () {
       .replace(/(^-|-$)+/g, "");
   }
 
-  // ২. মেইন ডিসকাউন্ট পার্সেন্টেজ অটো ক্যালকুলেশন
+  // discount percent auto calculate
   if (this.regularPrice && this.salePrice) {
     this.discountPercent = Math.round(
       ((this.regularPrice - this.salePrice) / this.regularPrice) * 100,
@@ -138,13 +146,12 @@ productSchema.pre("save", async function () {
     this.discountPercent = 0;
   }
 
-  // ৩. ভেরিয়েন্ট প্রোডাক্টের ক্ষেত্রে টোটাল স্টক এবং বেস প্রাইস সিঙ্ক
+  // variant থাকলে total stock + base price sync
   if (this.variants && this.variants.length > 0) {
     this.stock = this.variants.reduce(
       (total, variant) => total + variant.stock,
       0,
     );
-
     if (this.variants[0].regularPrice) {
       this.regularPrice = this.variants[0].regularPrice;
     }

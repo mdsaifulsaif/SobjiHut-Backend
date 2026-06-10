@@ -2,6 +2,125 @@ import { Order } from "./order.model";
 import { Product } from "../product/product.model";
 import { calculateShipping } from "./order.config";
 import { IOrder } from "./order.interface";
+import { Unit } from "../unit/unit.model";
+
+// const createOrderIntoDB = async (userID: string, payload: any) => {
+//   const {
+//     items,
+//     deliveryType,
+//     deliveryAddress,
+//     paymentMethod,
+//     preferredDeliveryTime,
+//     couponCode,
+//     specialInstructions,
+//     isGift,
+//     giftNote,
+//   } = payload;
+
+//   if (!items || items.length === 0) {
+//     throw new Error("Order must have at least one item!");
+//   }
+
+//   const orderItems = [];
+//   let subtotal = 0;
+
+//   for (const item of items) {
+//     const product = await Product.findById(item.productID).populate("unit");
+//     if (!product) throw new Error(`Product not found: ${item.productID}`);
+//     if (product.status !== "active")
+//       throw new Error(`Product unavailable: ${product.name}`);
+
+//     let unitPrice = product.regularPrice;
+//     let salePrice = product.salePrice;
+//     let sku = product.sku;
+//     let unit = (product.unit as any)?.name || "pcs";
+
+//     if (item.variantIndex !== undefined && product.variants?.length) {
+//       const variant = product.variants[item.variantIndex];
+//       if (!variant) throw new Error(`Variant not found for: ${product.name}`);
+
+//       // available = stock - reservedStock
+//       const available = variant.stock - (product.reservedStock || 0);
+//       if (available < item.quantity)
+//         throw new Error(
+//           `Insufficient stock for variant: ${variant.variantName}`,
+//         );
+
+//       unitPrice = variant.regularPrice;
+//       salePrice = variant.salePrice;
+//       sku = variant.sku;
+//     } else {
+//       // available = stock - reservedStock
+//       const available = product.stock - (product.reservedStock || 0);
+//       if (available < item.quantity)
+//         throw new Error(`Insufficient stock for: ${product.name}`);
+//     }
+
+//     const effectivePrice = salePrice || unitPrice;
+//     const totalPrice = effectivePrice * item.quantity;
+//     subtotal += totalPrice;
+
+//     orderItems.push({
+//       productID: product._id,
+//       variantIndex: item.variantIndex,
+//       productName: product.name,
+//       thumbnail: product.thumbnail,
+//       sku,
+//       quantity: item.quantity,
+//       unit,
+//       unitPrice,
+//       salePrice,
+//       totalPrice,
+//     });
+//   }
+
+//   const shippingCharge = calculateShipping(deliveryType, subtotal);
+//   let couponDiscount = 0;
+//   const discountAmount = couponDiscount;
+//   const totalAmount = subtotal - discountAmount + shippingCharge;
+
+//   const estimatedDays = deliveryType === "local" ? 0 : 3;
+//   const estimatedDelivery = new Date();
+//   estimatedDelivery.setDate(estimatedDelivery.getDate() + estimatedDays);
+
+//   // pending expire time — 30 মিনিট
+//   const pendingExpiresAt = new Date();
+//   pendingExpiresAt.setMinutes(pendingExpiresAt.getMinutes() + 30);
+
+//   const orderData: Partial<IOrder> = {
+//     userID: userID as any,
+//     items: orderItems,
+//     subtotal,
+//     discountAmount,
+//     couponCode,
+//     couponDiscount,
+//     shippingCharge,
+//     totalAmount,
+//     deliveryType,
+//     deliveryAddress,
+//     preferredDeliveryTime,
+//     estimatedDelivery,
+//     pendingExpiresAt, // 👈 expire time
+//     paymentMethod,
+//     paymentStatus: "unpaid",
+//     specialInstructions,
+//     isGift,
+//     giftNote,
+//   };
+
+//   const order = await Order.create(orderData);
+
+//   // ✅ actual stock নয়, শুধু reservedStock বাড়াও
+//   for (const item of items) {
+//     await Product.findByIdAndUpdate(item.productID, {
+//       $inc: { reservedStock: item.quantity },
+//     });
+//   }
+
+//   return order;
+// };
+
+//  Admin confirm করলে actual stock কাটো + reserve মুক্ত করো
 
 const createOrderIntoDB = async (userID: string, payload: any) => {
   const {
@@ -32,24 +151,28 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
     let unitPrice = product.regularPrice;
     let salePrice = product.salePrice;
     let sku = product.sku;
-    let unit = (product.unit as any)?.name || "pcs";
+    let unit = (product.unit as any)?.shortName || "pcs";
+    let weightOrVolume = product.weightOrVolume;
 
     if (item.variantIndex !== undefined && product.variants?.length) {
       const variant = product.variants[item.variantIndex];
       if (!variant) throw new Error(`Variant not found for: ${product.name}`);
 
-      // available = stock - reservedStock
       const available = variant.stock - (product.reservedStock || 0);
       if (available < item.quantity)
         throw new Error(
-          `Insufficient stock for variant: ${variant.variantName}`,
+          `Insufficient stock for variant: ${variant.variantName ?? `index ${item.variantIndex}`}`,
         );
 
       unitPrice = variant.regularPrice;
       salePrice = variant.salePrice;
       sku = variant.sku;
+      weightOrVolume = variant.weightOrVolume;
+
+      // variant এর unitID থেকে unit shortName নাও
+      const variantUnit = await Unit.findById((variant as any).unitID);
+      unit = variantUnit?.shortName || "pcs";
     } else {
-      // available = stock - reservedStock
       const available = product.stock - (product.reservedStock || 0);
       if (available < item.quantity)
         throw new Error(`Insufficient stock for: ${product.name}`);
@@ -67,6 +190,7 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
       sku,
       quantity: item.quantity,
       unit,
+      weightOrVolume,
       unitPrice,
       salePrice,
       totalPrice,
@@ -74,7 +198,7 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
   }
 
   const shippingCharge = calculateShipping(deliveryType, subtotal);
-  let couponDiscount = 0;
+  const couponDiscount = 0;
   const discountAmount = couponDiscount;
   const totalAmount = subtotal - discountAmount + shippingCharge;
 
@@ -82,7 +206,6 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
   const estimatedDelivery = new Date();
   estimatedDelivery.setDate(estimatedDelivery.getDate() + estimatedDays);
 
-  // pending expire time — 30 মিনিট
   const pendingExpiresAt = new Date();
   pendingExpiresAt.setMinutes(pendingExpiresAt.getMinutes() + 30);
 
@@ -99,7 +222,7 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
     deliveryAddress,
     preferredDeliveryTime,
     estimatedDelivery,
-    pendingExpiresAt, // 👈 expire time
+    pendingExpiresAt,
     paymentMethod,
     paymentStatus: "unpaid",
     specialInstructions,
@@ -109,7 +232,7 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
 
   const order = await Order.create(orderData);
 
-  // ✅ actual stock নয়, শুধু reservedStock বাড়াও
+  // actual stock নয়, শুধু reservedStock বাড়াও
   for (const item of items) {
     await Product.findByIdAndUpdate(item.productID, {
       $inc: { reservedStock: item.quantity },
@@ -118,8 +241,6 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
 
   return order;
 };
-
-//  Admin confirm করলে actual stock কাটো + reserve মুক্ত করো
 const updateOrderStatusByAdmin = async (
   orderID: string,
   status: string,

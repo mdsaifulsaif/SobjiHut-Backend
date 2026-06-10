@@ -1,9 +1,7 @@
 import { Types } from "mongoose";
 
-// ডেলিভারি টাইপ - local (Barisal area) vs nationwide
 export type DeliveryType = "local" | "nationwide";
 
-// অর্ডার স্ট্যাটাস - Chaldal-এর মতো flow
 export type OrderStatus =
   | "pending"
   | "confirmed"
@@ -14,34 +12,31 @@ export type OrderStatus =
   | "cancelled"
   | "returned";
 
-// পেমেন্ট মেথড
 export type PaymentMethod = "cod" | "bkash" | "nagad" | "card" | "bank";
 
-// পেমেন্ট স্ট্যাটাস
 export type PaymentStatus = "unpaid" | "paid" | "refunded" | "partially_paid";
 
-// অর্ডারের প্রতিটি প্রোডাক্ট আইটেম
 export interface IOrderItem {
   productID: Types.ObjectId;
-  variantIndex?: number; // variant থাকলে কোন index
-  productName: string; // snapshot - পরে প্রোডাক্ট চেঞ্জ হলেও অর্ডার ঠিক থাকবে
-  thumbnail: string; // snapshot
-  sku?: string; // snapshot
+  variantIndex?: number;
+  productName: string;
+  thumbnail: string;
+  weightOrVolume?: number;
+  sku?: string;
   quantity: number;
-  unit: string; // snapshot - "kg", "pcs" etc
-  unitPrice: number; // সেই সময়ের দাম (snapshot)
-  salePrice?: number; // ডিসকাউন্ট থাকলে
-  totalPrice: number; // quantity * effectivePrice
+  unit: string;
+  unitPrice: number;
+  salePrice?: number;
+  totalPrice: number;
 }
 
-// ডেলিভারি ঠিকানা
 export interface IDeliveryAddress {
   name: string;
   phone: string;
   city: string;
-  area?: string; // local delivery-র জন্য
-  district?: string; // nationwide-র জন্য
-  upazila?: string; // nationwide-র জন্য
+  area?: string;
+  district?: string;
+  upazila?: string;
   houseNo?: string;
   road?: string;
   block?: string;
@@ -52,53 +47,38 @@ export interface IDeliveryAddress {
   label?: "home" | "work" | "partner" | "other";
 }
 
-// টাইমলাইন - অর্ডারের প্রতিটি স্ট্যাটাস চেঞ্জের history
 export interface IStatusTimeline {
   status: OrderStatus;
   changedAt: Date;
-  note?: string; // admin note
-  changedBy?: Types.ObjectId; // কোন admin চেঞ্জ করেছে
+  note?: string;
+  changedBy?: Types.ObjectId;
 }
 
 export interface IOrder {
-  orderNumber: string; // human-readable: ORD-2024-00001
+  orderNumber: string;
   userID: Types.ObjectId;
-
   items: IOrderItem[];
-
-  // প্রাইস ব্রেকডাউন
   subtotal: number;
   discountAmount: number;
   couponCode?: string;
   couponDiscount: number;
   shippingCharge: number;
   totalAmount: number;
-
   pendingExpiresAt?: Date;
-
-  // ডেলিভারি
-  deliveryType: DeliveryType; // local বা nationwide
+  deliveryType: DeliveryType;
   deliveryAddress: IDeliveryAddress;
-  preferredDeliveryTime?: string; // "morning", "afternoon", "evening"
+  preferredDeliveryTime?: string;
   estimatedDelivery?: Date;
-
-  // পেমেন্ট
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
-  transactionID?: string; // bkash/nagad transaction ref
-
-  // স্ট্যাটাস
+  transactionID?: string;
   status: OrderStatus;
   statusTimeline: IStatusTimeline[];
-
-  // Extra
   specialInstructions?: string;
   isGift?: boolean;
   giftNote?: string;
-
   cancelReason?: string;
   cancelledBy?: "user" | "admin";
-
   createdAt?: Date;
   updatedAt?: Date;
 }

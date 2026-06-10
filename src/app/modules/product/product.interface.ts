@@ -7,8 +7,9 @@ import { Types } from "mongoose";
 
 export interface IProductVariant {
   _id?: string;
-  variantName: string;
+  variantName?: string;
   weightOrVolume: number;
+  unitID: Types.ObjectId | string;
   regularPrice: number;
   salePrice?: number;
   stock: number;
@@ -44,7 +45,7 @@ export interface IProduct {
   discountPercent?: number;
   stock: number;
   reservedStock?: number;
-  availableStock?: number; // virtual
+  availableStock?: number;
   sku?: string;
   lowStockAlert?: number;
   thumbnail: string;
@@ -56,8 +57,9 @@ export interface IProduct {
   numReviews?: number;
   status: "active" | "inactive" | "draft";
   productType: "single" | "combo";
-  unit: Types.ObjectId | string; // 👈 ইউনিট রিলেশন আইডি
-  variants?: IProductVariant[];
+  unit: Types.ObjectId | string;
+  weightOrVolume?: number; // 👈 single product এর জন্য
+  variants?: IProductVariant[]; // 👈 IProductVariant use করছে
   comboItems?: IComboItem[];
   specifications?: ISpecification[];
   isFeatured: boolean;
