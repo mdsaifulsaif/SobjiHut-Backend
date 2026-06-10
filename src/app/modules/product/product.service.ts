@@ -7,18 +7,9 @@ import cloudinary from "../../config/cloudinary";
 
 // ===================== CREATE =====================
 const createProductIntoDB = async (body: Record<string, any>, files: any) => {
-  const {
-    name,
-    shortDescription,
-    description,
-    costPrice,
-    categoryID,
-    stock,
-    unit,
-    productType,
-  } = body;
+  const { name, shortDescription, description, categoryID, stock, unit, productType } = body;
 
-  // ১. variants parse
+  // ১. variants parse আগে
   let variants: any[] = [];
   try {
     if (body.variants) variants = JSON.parse(body.variants);
@@ -26,64 +17,50 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     throw new Error("Invalid JSON format for variants.");
   }
 
+  // ২. বাকি JSON parse
+  let comboItems: any[] = [];
+  let tags: string[] = [];
+  let lowdown: string[] = [];
+  let specifications: any[] = [];
+
+  try {
+    if (body.comboItems) comboItems = JSON.parse(body.comboItems);
+    if (body.tags) tags = JSON.parse(body.tags);
+    if (body.lowdown) lowdown = JSON.parse(body.lowdown);
+    if (body.specifications) specifications = JSON.parse(body.specifications);
+  } catch {
+    throw new Error("Invalid JSON format for array fields.");
+  }
+
   const hasVariants = variants && variants.length > 0;
+  const isCombo = productType === "combo";
+  const isSingle = !isCombo;
 
-  // ২. required field validation
-  if (!name || !shortDescription || !categoryID || !unit) {
-    throw new Error(
-      "Please provide: name, shortDescription, categoryID, unit.",
-    );
+  // ৩. required field validation
+  if (!name || !shortDescription || !categoryID) {
+    throw new Error("Please provide: name, shortDescription, categoryID.");
   }
 
-  if (!hasVariants) {
+  // ✅ unit শুধু single product এ required (variant নেই)
+  if (isSingle && !hasVariants && !unit) {
+    throw new Error("Unit is required for single product.");
+  }
+
+  // ✅ single product (no variant) এ price/stock/weightOrVolume required
+  if (isSingle && !hasVariants) {
     if (!body.regularPrice) throw new Error("Regular price is required.");
-    if (stock === undefined) throw new Error("Stock is required.");
-    if (!body.weightOrVolume)
-      throw new Error("weightOrVolume is required for single product.");
+    if (stock === undefined || stock === null) throw new Error("Stock is required.");
+    if (!body.weightOrVolume) throw new Error("weightOrVolume is required for single product.");
   }
 
-  // ৩. variant validation
-  // if (hasVariants) {
-  //   const seen = new Set<string>();
-
-  //   for (const variant of variants) {
-  //     // unitID required
-  //     if (!variant.unitID) {
-  //       throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
-  //     }
-  //     // regularPrice required
-  //     if (!variant.regularPrice || Number(variant.regularPrice) <= 0) {
-  //       throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
-  //     }
-  //     // weightOrVolume required
-  //     if (
-  //       variant.weightOrVolume === undefined ||
-  //       variant.weightOrVolume === null
-  //     ) {
-  //       throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
-  //     }
-
-  //     // ✅ Duplicate unitID + weightOrVolume check
-  //     const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
-  //     if (seen.has(key)) {
-  //       throw new Error(
-  //         `Duplicate variant: unitID "${variant.unitID}" তে weightOrVolume "${variant.weightOrVolume}" ইতিমধ্যে আছে।`,
-  //       );
-  //     }
-  //     seen.add(key);
-  //   }
-  // }
+  // ৪. variant validation
   if (hasVariants) {
     const seen = new Set<string>();
     for (const variant of variants) {
-      if (!variant.unitID)
-        throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
+      if (!variant.unitID) throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
       if (!variant.regularPrice || Number(variant.regularPrice) <= 0)
         throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
-      if (
-        variant.weightOrVolume === undefined ||
-        variant.weightOrVolume === null
-      )
+      if (variant.weightOrVolume === undefined || variant.weightOrVolume === null)
         throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
 
       const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
@@ -92,74 +69,69 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     }
   }
 
-  const cost = Number(costPrice) || 0;
-  const regular = hasVariants
-    ? Number(variants[0]?.regularPrice || 0)
-    : Number(body.regularPrice);
-  const qty = hasVariants
-    ? variants.reduce(
-        (total: number, v: any) => total + Number(v.stock || 0),
-        0,
-      )
-    : Number(stock);
+  // ৫. price calculate
+  const cost = isCombo
+    ? Number(body.costPrice) || 0
+    : hasVariants
+      ? 0
+      : Number(body.costPrice) || 0;
+
+  const regular = isCombo
+    ? Number(body.regularPrice) || 0
+    : hasVariants
+      ? Number(variants[0]?.regularPrice || 0)
+      : Number(body.regularPrice) || 0;
+
+  const qty = isCombo
+    ? Number(stock) || 0
+    : hasVariants
+      ? variants.reduce((total: number, v: any) => total + Number(v.stock || 0), 0)
+      : Number(stock) || 0;
+
   const sale = body.salePrice ? Number(body.salePrice) : undefined;
 
-  if (!hasVariants) {
-    if (cost <= 0 || regular <= 0)
-      throw new Error("Prices must be greater than zero.");
-    if (sale && sale >= regular)
-      throw new Error("Sale price must be less than regular price.");
+  // ৬. price validation — শুধু single (no variant) এ
+  if (isSingle && !hasVariants) {
+    if (regular <= 0) throw new Error("Regular price must be greater than zero.");
+    if (sale && sale >= regular) throw new Error("Sale price must be less than regular price.");
   }
 
-  // ৪. বাকি JSON parse
-  let tags: string[] = [];
-  let lowdown: string[] = [];
-  let comboItems: any[] = [];
-  let specifications: any[] = [];
-
-  try {
-    if (body.tags) tags = JSON.parse(body.tags);
-    if (body.lowdown) lowdown = JSON.parse(body.lowdown);
-    if (body.comboItems) comboItems = JSON.parse(body.comboItems);
-    if (body.specifications) specifications = JSON.parse(body.specifications);
-  } catch {
-    throw new Error("Invalid JSON format for array fields.");
-  }
-
-  // ৫. combo validation
-  if (productType === "combo") {
+  // ৭. combo validation + selectedVariant clean
+  if (isCombo) {
     if (!comboItems || comboItems.length === 0) {
       throw new Error("Combo product must have at least one item.");
     }
+
+    // ✅ selectedVariant empty string → null
+    comboItems = comboItems.map((item: any) => ({
+      ...item,
+      selectedVariant: item.selectedVariant && item.selectedVariant !== ""
+        ? item.selectedVariant
+        : null,
+    }));
+
     for (const item of comboItems) {
-      if (!item.productID)
-        throw new Error("Each combo item must have productID.");
+      if (!item.productID) throw new Error("Each combo item must have productID.");
       const dbProduct = await Product.findById(item.productID);
       if (!dbProduct) throw new Error(`Product not found: ${item.productID}`);
       const requiredQty = Number(item.quantity || 1);
+
       if (item.selectedVariant) {
         const targetVariant = dbProduct.variants?.find(
           (v: any) => v._id?.toString() === item.selectedVariant,
         );
-        if (!targetVariant)
-          throw new Error(`Variant "${item.selectedVariant}" not found.`);
-        if (Number(targetVariant.stock) <= 0)
-          throw new Error(`Variant "${item.selectedVariant}" is Out of Stock.`);
-        if (requiredQty > Number(targetVariant.stock))
-          throw new Error(
-            `Insufficient stock for variant "${item.selectedVariant}".`,
-          );
+        if (!targetVariant) throw new Error(`Variant not found.`);
+        if (Number(targetVariant.stock) <= 0) throw new Error(`Variant is Out of Stock.`);
+        if (requiredQty > Number(targetVariant.stock)) throw new Error(`Insufficient stock for variant.`);
       } else {
         const available = dbProduct.stock - (dbProduct.reservedStock || 0);
-        if (available <= 0)
-          throw new Error(`"${dbProduct.name}" is Out of Stock.`);
-        if (requiredQty > available)
-          throw new Error(`Insufficient stock for "${dbProduct.name}".`);
+        if (available <= 0) throw new Error(`"${dbProduct.name}" is Out of Stock.`);
+        if (requiredQty > available) throw new Error(`Insufficient stock for "${dbProduct.name}".`);
       }
     }
   }
 
-  // ৬. dimensions
+  // ৮. dimensions
   const dimensions =
     body.length || body.width || body.height
       ? {
@@ -169,23 +141,32 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
         }
       : undefined;
 
-  // ৭. payload
-  // ৭. payload
+  // ৯. payload
   const productData: Partial<IProduct> = {
     name,
     shortDescription,
     description,
     categoryID,
-    unit,
     productType: productType || "single",
-    costPrice: hasVariants ? 0 : cost, // ✅ একবারই থাকবে
+    costPrice: cost,
     regularPrice: regular,
     salePrice: sale,
     stock: qty,
-    weightOrVolume: !hasVariants ? Number(body.weightOrVolume) : undefined,
+
+    // ✅ unit — single product এ body থেকে, combo/variant এ null
+    unit: isSingle && !hasVariants && unit ? unit : null,
+
+    // ✅ weightOrVolume — শুধু single product এ
+    ...(isSingle && !hasVariants && body.weightOrVolume && {
+      weightOrVolume: Number(body.weightOrVolume),
+    }),
+
     sku: body.sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     lowStockAlert: body.lowStockAlert ? Number(body.lowStockAlert) : 10,
-    brandID: body.brandID || "nonebrand",
+
+    // ✅ brandID — combo তে nonebrand
+    brandID: isCombo ? "nonebrand" : (body.brandID || "nonebrand"),
+
     tags,
     lowdown,
     variants,
@@ -203,7 +184,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     dimensions,
   };
 
-  // ৮. thumbnail upload
+  // ১০. thumbnail upload
   const thumbnailFiles = files?.thumbnail;
   if (thumbnailFiles && thumbnailFiles[0]) {
     const result: any = await uploadToCloudinary(
@@ -215,7 +196,7 @@ const createProductIntoDB = async (body: Record<string, any>, files: any) => {
     throw new Error("Product thumbnail is required!");
   }
 
-  // ৯. gallery upload
+  // ১১. gallery upload
   const galleryFiles = files?.images;
   if (galleryFiles && galleryFiles.length > 0) {
     const uploadResults: any[] = await Promise.all(
@@ -247,49 +228,41 @@ const updateProductIntoDB = async (
   }
 
   const hasVariants = variants && variants.length > 0;
+  const isCombo = (body.productType || existingProduct.productType) === "combo";
 
   // ২. variant validation
   if (hasVariants) {
     const seen = new Set<string>();
     for (const variant of variants) {
-      if (!variant.unitID)
-        throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
+      if (!variant.unitID) throw new Error(`একটি variant এ unitID দেওয়া হয়নি।`);
       if (!variant.regularPrice || Number(variant.regularPrice) <= 0)
         throw new Error(`একটি variant এ regularPrice দেওয়া হয়নি বা শূন্য।`);
-      if (
-        variant.weightOrVolume === undefined ||
-        variant.weightOrVolume === null
-      )
+      if (variant.weightOrVolume === undefined || variant.weightOrVolume === null)
         throw new Error(`একটি variant এ weightOrVolume দেওয়া হয়নি।`);
 
       const key = `${variant.unitID}_${Number(variant.weightOrVolume)}`;
       if (seen.has(key))
-        throw new Error(
-          `Duplicate variant: unitID "${variant.unitID}" তে weightOrVolume "${variant.weightOrVolume}" ইতিমধ্যে আছে।`,
-        );
+        throw new Error(`Duplicate variant found.`);
       seen.add(key);
     }
   }
 
   // ৩. price validation (single product only)
-  if (!hasVariants && (body.regularPrice || body.costPrice)) {
+  if (!hasVariants && !isCombo && (body.regularPrice || body.costPrice)) {
     const cost = Number(body.costPrice || existingProduct.costPrice);
     const regular = Number(body.regularPrice || existingProduct.regularPrice);
-    const sale =
-      body.salePrice !== undefined
-        ? Number(body.salePrice)
-        : existingProduct.salePrice;
+    const sale = body.salePrice !== undefined
+      ? Number(body.salePrice)
+      : existingProduct.salePrice;
 
-    if (cost <= 0 || regular <= 0)
-      throw new Error("Prices must be greater than zero.");
-    if (sale && sale >= regular)
-      throw new Error("Sale price must be less than regular price.");
+    if (regular <= 0) throw new Error("Regular price must be greater than zero.");
+    if (sale && sale >= regular) throw new Error("Sale price must be less than regular price.");
   }
 
   // ৪. JSON parse
   let tags = existingProduct.tags;
   let lowdown = existingProduct.lowdown;
-  let comboItems = existingProduct.comboItems;
+  let comboItems: any[] = (existingProduct.comboItems ?? []) as any[];
   let specifications = existingProduct.specifications;
 
   try {
@@ -301,22 +274,28 @@ const updateProductIntoDB = async (
     throw new Error("Invalid JSON format for array fields.");
   }
 
-  // ৫. combo validation
+  // ৫. combo validation + selectedVariant clean
   const productType = body.productType || existingProduct.productType;
   if (productType === "combo" && body.comboItems) {
+    // ✅ selectedVariant empty string → null
+    comboItems = comboItems.map((item: any) => ({
+      ...item,
+      selectedVariant: item.selectedVariant && item.selectedVariant !== ""
+        ? item.selectedVariant
+        : null,
+    }));
+
     if (!comboItems || comboItems.length === 0)
       throw new Error("Combo must have at least one item.");
+
     for (const item of comboItems) {
-      if (!item.productID)
-        throw new Error("Each combo item must have productID.");
+      if (!item.productID) throw new Error("Each combo item must have productID.");
       const dbProduct = await Product.findById(item.productID);
       if (!dbProduct) throw new Error(`Product not found: ${item.productID}`);
       const requiredQty = Number(item.quantity || 1);
       const available = dbProduct.stock - (dbProduct.reservedStock || 0);
-      if (available <= 0)
-        throw new Error(`"${dbProduct.name}" is Out of Stock.`);
-      if (requiredQty > available)
-        throw new Error(`Insufficient stock for "${dbProduct.name}".`);
+      if (available <= 0) throw new Error(`"${dbProduct.name}" is Out of Stock.`);
+      if (requiredQty > available) throw new Error(`Insufficient stock for "${dbProduct.name}".`);
     }
   }
 
@@ -324,15 +303,9 @@ const updateProductIntoDB = async (
   const dimensions =
     body.length || body.width || body.height
       ? {
-          length: body.length
-            ? Number(body.length)
-            : existingProduct.dimensions?.length,
-          width: body.width
-            ? Number(body.width)
-            : existingProduct.dimensions?.width,
-          height: body.height
-            ? Number(body.height)
-            : existingProduct.dimensions?.height,
+          length: body.length ? Number(body.length) : existingProduct.dimensions?.length,
+          width: body.width ? Number(body.width) : existingProduct.dimensions?.width,
+          height: body.height ? Number(body.height) : existingProduct.dimensions?.height,
         }
       : existingProduct.dimensions;
 
@@ -342,71 +315,65 @@ const updateProductIntoDB = async (
     ...(body.shortDescription && { shortDescription: body.shortDescription }),
     ...(body.description && { description: body.description }),
     ...(body.categoryID && { categoryID: body.categoryID }),
-    ...(body.unit && { unit: body.unit }),
-    ...(body.brandID && { brandID: body.brandID }),
     ...(body.productType && { productType: body.productType }),
 
-    // ✅ variant থাকলে costPrice 0, না থাকলে body থেকে নাও
+    // ✅ unit — single (no variant) এ update, অন্যথায় null
+    unit: !hasVariants && !isCombo && body.unit
+      ? body.unit
+      : existingProduct.unit,
+
+    // ✅ brandID — combo তে nonebrand
+    brandID: isCombo
+      ? "nonebrand"
+      : (body.brandID || existingProduct.brandID),
+
+    // ✅ costPrice
     costPrice: hasVariants
       ? 0
-      : body.costPrice
-        ? Number(body.costPrice)
-        : existingProduct.costPrice,
+      : isCombo
+        ? Number(body.costPrice) || existingProduct.costPrice
+        : body.costPrice
+          ? Number(body.costPrice)
+          : existingProduct.costPrice,
 
-    // ✅ variant থাকলে first variant এর price, না থাকলে body থেকে
+    // ✅ regularPrice
     regularPrice: hasVariants
       ? Number(variants[0]?.regularPrice || existingProduct.regularPrice)
       : body.regularPrice
         ? Number(body.regularPrice)
         : existingProduct.regularPrice,
 
-    // ✅ variant থাকলে total stock auto calculate
+    // ✅ stock
     stock: hasVariants
-      ? variants.reduce(
-          (total: number, v: any) => total + Number(v.stock || 0),
-          0,
-        )
+      ? variants.reduce((total: number, v: any) => total + Number(v.stock || 0), 0)
       : body.stock !== undefined
         ? Number(body.stock)
         : existingProduct.stock,
 
-    // ✅ single product এর weightOrVolume
-    ...(!hasVariants &&
-      body.weightOrVolume && {
-        weightOrVolume: Number(body.weightOrVolume),
-      }),
+    // ✅ weightOrVolume — single product এ
+    ...(!hasVariants && !isCombo && body.weightOrVolume && {
+      weightOrVolume: Number(body.weightOrVolume),
+    }),
 
-    // ✅ variant থাকলে salePrice first variant থেকে, না থাকলে body থেকে
+    // ✅ salePrice
     salePrice: hasVariants
-      ? variants[0]?.salePrice
-        ? Number(variants[0].salePrice)
-        : undefined
+      ? (variants[0]?.salePrice ? Number(variants[0].salePrice) : undefined)
       : body.salePrice !== undefined
         ? Number(body.salePrice)
         : existingProduct.salePrice,
 
     ...(body.sku && { sku: body.sku }),
-    ...(body.lowStockAlert !== undefined && {
-      lowStockAlert: Number(body.lowStockAlert),
-    }),
+    ...(body.lowStockAlert !== undefined && { lowStockAlert: Number(body.lowStockAlert) }),
     ...(body.weight !== undefined && { weight: Number(body.weight) }),
-    ...(body.shippingCost !== undefined && {
-      shippingCost: Number(body.shippingCost),
-    }),
+    ...(body.shippingCost !== undefined && { shippingCost: Number(body.shippingCost) }),
     ...(body.shippingClass && { shippingClass: body.shippingClass }),
-    ...(body.freeShipping !== undefined && {
-      freeShipping: body.freeShipping === "true",
-    }),
-    ...(body.isFeatured !== undefined && {
-      isFeatured: body.isFeatured === "true",
-    }),
+    ...(body.freeShipping !== undefined && { freeShipping: body.freeShipping === "true" }),
+    ...(body.isFeatured !== undefined && { isFeatured: body.isFeatured === "true" }),
     ...(body.isOnSale !== undefined && { isOnSale: body.isOnSale === "true" }),
     ...(body.isNew !== undefined && { isNew: body.isNew === "true" }),
     ...(body.status && { status: body.status }),
     ...(body.metaTitle !== undefined && { metaTitle: body.metaTitle }),
-    ...(body.metaDescription !== undefined && {
-      metaDescription: body.metaDescription,
-    }),
+    ...(body.metaDescription !== undefined && { metaDescription: body.metaDescription }),
     ...(body.straight_up !== undefined && { straight_up: body.straight_up }),
     tags,
     lowdown,
@@ -421,10 +388,7 @@ const updateProductIntoDB = async (
   if (thumbnailFiles && thumbnailFiles[0]) {
     if (existingProduct.thumbnail) {
       const publicId = existingProduct.thumbnail
-        .split("/")
-        .slice(-2)
-        .join("/")
-        .replace(/\.[^/.]+$/, "");
+        .split("/").slice(-2).join("/").replace(/\.[^/.]+$/, "");
       await cloudinary.uploader.destroy(publicId);
     }
     const result: any = await uploadToCloudinary(
@@ -441,10 +405,7 @@ const updateProductIntoDB = async (
       await Promise.all(
         existingProduct.images.map((imgUrl: string) => {
           const publicId = imgUrl
-            .split("/")
-            .slice(-2)
-            .join("/")
-            .replace(/\.[^/.]+$/, "");
+            .split("/").slice(-2).join("/").replace(/\.[^/.]+$/, "");
           return cloudinary.uploader.destroy(publicId);
         }),
       );
@@ -464,8 +425,6 @@ const updateProductIntoDB = async (
   ).populate("categoryID", "name image");
 };
 
-
-
 const getAllProductsFromDB = async (query: Record<string, any>) => {
   const {
     searchTerm,
@@ -475,13 +434,13 @@ const getAllProductsFromDB = async (query: Record<string, any>) => {
     isFeatured,
     page = 1,
     limit = 8,
-    
+
     sort = "-createdAt",
   } = query;
 
   const pageNum = Number(page);
   const limitNum = Number(limit);
-  const safeLimit = limitNum > 0 ? limitNum : 10; 
+  const safeLimit = limitNum > 0 ? limitNum : 10;
 
   const matchStage: any = {};
   if (searchTerm) {

@@ -20,8 +20,8 @@ const productSchema = new Schema<IProduct>(
     },
     tags: [{ type: String, trim: true }],
 
-    costPrice: { type: Number, required: true, min: 0 },
-    regularPrice: { type: Number, required: true, min: 0 },
+    costPrice: { type: Number, required: false, min: 0, default: 0 }, // ✅
+    regularPrice: { type: Number, required: false, min: 0, default: 0 }, // ✅
     salePrice: { type: Number, min: 0 },
     discountPercent: { type: Number, default: 0, min: 0, max: 100 },
     stock: { type: Number, required: true, default: 0, min: 0 },
@@ -35,19 +35,18 @@ const productSchema = new Schema<IProduct>(
       default: "single",
     },
 
-    // single product এর unit + weightOrVolume
+    // ✅ unit — required false (variant/combo তে লাগে না)
     unit: {
       type: Schema.Types.ObjectId,
       ref: "Unit",
-      required: true,
+      required: false,
+      default: null,
     },
-    weightOrVolume: { type: Number, min: 0 }, // single product এর জন্য
+    weightOrVolume: { type: Number, min: 0 },
 
     variants: {
       type: [
         {
-          // variantName সরানো হয়েছে
-          // Display label = weightOrVolume + unitID.name (populate করে)
           weightOrVolume: { type: Number, required: true, min: 0 },
           unitID: {
             type: Schema.Types.ObjectId,
@@ -74,7 +73,7 @@ const productSchema = new Schema<IProduct>(
           },
           quantity: { type: Number, default: 1, min: 1 },
           selectedVariant: {
-            type: Schema.Types.ObjectId, // variant এর _id store হবে
+            type: Schema.Types.ObjectId,
             default: null,
           },
         },
@@ -117,26 +116,20 @@ const productSchema = new Schema<IProduct>(
 
     metaTitle: { type: String, trim: true, default: "" },
     metaDescription: { type: String, trim: true, default: "" },
-
     rating: { type: Number, default: 0, min: 0, max: 5 },
     numReviews: { type: Number, default: 0, min: 0 },
-
     straight_up: { type: String, trim: true },
     lowdown: [{ type: String, trim: true }],
   },
-  {
-    timestamps: true,
-  },
+  { timestamps: true },
 );
 
-// available stock virtual
 productSchema.virtual("availableStock").get(function () {
   return this.stock - (this.reservedStock || 0);
 });
 
-// pre save automation
 productSchema.pre("save", async function () {
-  // ১. slug auto generate
+  // slug auto generate
   if (!this.slug && this.name) {
     this.slug = this.name
       .toLowerCase()
@@ -144,7 +137,7 @@ productSchema.pre("save", async function () {
       .replace(/(^-|-$)+/g, "");
   }
 
-  // ২. discount percent auto calculate
+  // discount percent auto calculate
   if (this.regularPrice && this.salePrice) {
     this.discountPercent = Math.round(
       ((this.regularPrice - this.salePrice) / this.regularPrice) * 100,
@@ -153,7 +146,7 @@ productSchema.pre("save", async function () {
     this.discountPercent = 0;
   }
 
-  // ৩. variant থাকলে total stock + base price sync
+  // variant থাকলে total stock + base price sync
   if (this.variants && this.variants.length > 0) {
     this.stock = this.variants.reduce(
       (total, variant) => total + variant.stock,
@@ -167,6 +160,5 @@ productSchema.pre("save", async function () {
     }
   }
 });
-
 
 export const Product = model<IProduct>("Product", productSchema);
