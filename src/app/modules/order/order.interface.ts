@@ -18,7 +18,8 @@ export type PaymentStatus = "unpaid" | "paid" | "refunded" | "partially_paid";
 
 export interface IOrderItem {
   productID: Types.ObjectId;
-  variantIndex?: number;
+  variantID?: Types.ObjectId | null;  // ✅
+  productType?: string;               // ✅
   productName: string;
   thumbnail: string;
   weightOrVolume?: number;

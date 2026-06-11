@@ -1,362 +1,464 @@
+import mongoose, { Types } from "mongoose";
 import { Order } from "./order.model";
 import { Product } from "../product/product.model";
 import { calculateShipping } from "./order.config";
-import { IOrder } from "./order.interface";
+import { IOrder, IOrderItem } from "./order.interface";
 import { Unit } from "../unit/unit.model";
 
-// const createOrderIntoDB = async (userID: string, payload: any) => {
-//   const {
-//     items,
-//     deliveryType,
-//     deliveryAddress,
-//     paymentMethod,
-//     preferredDeliveryTime,
-//     couponCode,
-//     specialInstructions,
-//     isGift,
-//     giftNote,
-//   } = payload;
-
-//   if (!items || items.length === 0) {
-//     throw new Error("Order must have at least one item!");
-//   }
-
-//   const orderItems = [];
-//   let subtotal = 0;
-
-//   for (const item of items) {
-//     const product = await Product.findById(item.productID).populate("unit");
-//     if (!product) throw new Error(`Product not found: ${item.productID}`);
-//     if (product.status !== "active")
-//       throw new Error(`Product unavailable: ${product.name}`);
-
-//     let unitPrice = product.regularPrice;
-//     let salePrice = product.salePrice;
-//     let sku = product.sku;
-//     let unit = (product.unit as any)?.name || "pcs";
-
-//     if (item.variantIndex !== undefined && product.variants?.length) {
-//       const variant = product.variants[item.variantIndex];
-//       if (!variant) throw new Error(`Variant not found for: ${product.name}`);
-
-//       // available = stock - reservedStock
-//       const available = variant.stock - (product.reservedStock || 0);
-//       if (available < item.quantity)
-//         throw new Error(
-//           `Insufficient stock for variant: ${variant.variantName}`,
-//         );
-
-//       unitPrice = variant.regularPrice;
-//       salePrice = variant.salePrice;
-//       sku = variant.sku;
-//     } else {
-//       // available = stock - reservedStock
-//       const available = product.stock - (product.reservedStock || 0);
-//       if (available < item.quantity)
-//         throw new Error(`Insufficient stock for: ${product.name}`);
-//     }
-
-//     const effectivePrice = salePrice || unitPrice;
-//     const totalPrice = effectivePrice * item.quantity;
-//     subtotal += totalPrice;
-
-//     orderItems.push({
-//       productID: product._id,
-//       variantIndex: item.variantIndex,
-//       productName: product.name,
-//       thumbnail: product.thumbnail,
-//       sku,
-//       quantity: item.quantity,
-//       unit,
-//       unitPrice,
-//       salePrice,
-//       totalPrice,
-//     });
-//   }
-
-//   const shippingCharge = calculateShipping(deliveryType, subtotal);
-//   let couponDiscount = 0;
-//   const discountAmount = couponDiscount;
-//   const totalAmount = subtotal - discountAmount + shippingCharge;
-
-//   const estimatedDays = deliveryType === "local" ? 0 : 3;
-//   const estimatedDelivery = new Date();
-//   estimatedDelivery.setDate(estimatedDelivery.getDate() + estimatedDays);
-
-//   // pending expire time — 30 মিনিট
-//   const pendingExpiresAt = new Date();
-//   pendingExpiresAt.setMinutes(pendingExpiresAt.getMinutes() + 30);
-
-//   const orderData: Partial<IOrder> = {
-//     userID: userID as any,
-//     items: orderItems,
-//     subtotal,
-//     discountAmount,
-//     couponCode,
-//     couponDiscount,
-//     shippingCharge,
-//     totalAmount,
-//     deliveryType,
-//     deliveryAddress,
-//     preferredDeliveryTime,
-//     estimatedDelivery,
-//     pendingExpiresAt, // 👈 expire time
-//     paymentMethod,
-//     paymentStatus: "unpaid",
-//     specialInstructions,
-//     isGift,
-//     giftNote,
-//   };
-
-//   const order = await Order.create(orderData);
-
-//   // ✅ actual stock নয়, শুধু reservedStock বাড়াও
-//   for (const item of items) {
-//     await Product.findByIdAndUpdate(item.productID, {
-//       $inc: { reservedStock: item.quantity },
-//     });
-//   }
-
-//   return order;
-// };
-
-//  Admin confirm করলে actual stock কাটো + reserve মুক্ত করো
-
-const createOrderIntoDB = async (userID: string, payload: any) => {
-  const {
-    items,
-    deliveryType,
-    deliveryAddress,
-    paymentMethod,
-    preferredDeliveryTime,
-    couponCode,
-    specialInstructions,
-    isGift,
-    giftNote,
-  } = payload;
-
-  if (!items || items.length === 0) {
-    throw new Error("Order must have at least one item!");
-  }
-
-  const orderItems = [];
-  let subtotal = 0;
-
+// ===================== HELPER: Stock Deduct =====================
+const deductStockForItems = async (
+  items: IOrderItem[],
+  session: mongoose.ClientSession,
+) => {
   for (const item of items) {
-    const product = await Product.findById(item.productID).populate("unit");
-    if (!product) throw new Error(`Product not found: ${item.productID}`);
-    if (product.status !== "active")
-      throw new Error(`Product unavailable: ${product.name}`);
+    const orderItem = item as any;
 
-    let unitPrice = product.regularPrice;
-    let salePrice = product.salePrice;
-    let sku = product.sku;
-    let unit = (product.unit as any)?.shortName || "pcs";
-    let weightOrVolume = product.weightOrVolume;
+    if (orderItem.productType === "combo") {
+      // combo main stock কাটো
+      await Product.findByIdAndUpdate(
+        orderItem.productID,
+        { $inc: { stock: -orderItem.quantity, reservedStock: -orderItem.quantity } },
+        { session },
+      );
 
-    if (item.variantIndex !== undefined && product.variants?.length) {
-      const variant = product.variants[item.variantIndex];
-      if (!variant) throw new Error(`Variant not found for: ${product.name}`);
+      // combo inner products stock কাটো
+      const comboProduct = await Product.findById(orderItem.productID).session(session);
+      if (!comboProduct) continue;
 
-      const available = variant.stock - (product.reservedStock || 0);
-      if (available < item.quantity)
-        throw new Error(
-          `Insufficient stock for variant: ${variant.variantName ?? `index ${item.variantIndex}`}`,
+      for (const comboItem of (comboProduct.comboItems as any[])) {
+        const requiredQty = comboItem.quantity * orderItem.quantity;
+
+        if (comboItem.selectedVariant) {
+          const innerProduct = await Product.findById(comboItem.productID).session(session);
+          if (!innerProduct) continue;
+
+          const vIdx = (innerProduct.variants ?? []).findIndex(
+            (v: any) => v._id?.toString() === comboItem.selectedVariant?.toString(),
+          );
+
+          if (vIdx !== -1) {
+            await Product.findByIdAndUpdate(
+              comboItem.productID,
+              {
+                $inc: {
+                  [`variants.${vIdx}.stock`]: -requiredQty,
+                  stock: -requiredQty,
+                },
+              },
+              { session },
+            );
+          }
+        } else {
+          await Product.findByIdAndUpdate(
+            comboItem.productID,
+            { $inc: { stock: -requiredQty } },
+            { session },
+          );
+        }
+      }
+
+    } else if (orderItem.variantID) {
+      // variant product
+      const product = await Product.findById(orderItem.productID).session(session);
+      if (!product) continue;
+
+      const vIdx = (product.variants ?? []).findIndex(
+        (v: any) => v._id?.toString() === orderItem.variantID?.toString(),
+      );
+
+      if (vIdx !== -1) {
+        await Product.findByIdAndUpdate(
+          orderItem.productID,
+          {
+            $inc: {
+              [`variants.${vIdx}.stock`]: -orderItem.quantity,
+              stock: -orderItem.quantity,
+              reservedStock: -orderItem.quantity,
+            },
+          },
+          { session },
+        );
+      }
+
+    } else {
+      // single product
+      await Product.findByIdAndUpdate(
+        orderItem.productID,
+        { $inc: { stock: -orderItem.quantity, reservedStock: -orderItem.quantity } },
+        { session },
+      );
+    }
+  }
+};
+
+// ===================== HELPER: Stock Restore =====================
+const restoreStockForItems = async (
+  items: IOrderItem[],
+  prevStatus: string,
+  session: mongoose.ClientSession,
+) => {
+  for (const item of items) {
+    const orderItem = item as any;
+
+    if (prevStatus === "pending") {
+      // ✅ pending এ শুধু reservedStock ফেরত
+      // stock: 40, reserved: 2 → stock: 40, reserved: 0
+      await Product.findByIdAndUpdate(
+        orderItem.productID,
+        { $inc: { reservedStock: -orderItem.quantity } },
+        { session },
+      );
+
+    } else if (prevStatus === "confirmed") {
+      // ✅ confirmed এ শুধু stock ফেরত — reservedStock touch করবো না
+      // কারণ confirm হওয়ার সময় reservedStock already 0 হয়ে গেছে
+      // stock: 38, reserved: 0 → stock: 40, reserved: 0
+
+      if (orderItem.variantID) {
+        const product = await Product.findById(orderItem.productID).session(session);
+        if (!product) continue;
+
+        const vIdx = (product.variants ?? []).findIndex(
+          (v: any) => v._id?.toString() === orderItem.variantID?.toString(),
         );
 
-      unitPrice = variant.regularPrice;
-      salePrice = variant.salePrice;
-      sku = variant.sku;
-      weightOrVolume = variant.weightOrVolume;
+        if (vIdx !== -1) {
+          await Product.findByIdAndUpdate(
+            orderItem.productID,
+            {
+              $inc: {
+                [`variants.${vIdx}.stock`]: orderItem.quantity, // ✅ variant stock ফেরত
+                stock: orderItem.quantity,                       // ✅ main stock ফেরত
+                // reservedStock touch করবো না
+              },
+            },
+            { session },
+          );
+        }
 
-      // variant এর unitID থেকে unit shortName নাও
-      const variantUnit = await Unit.findById((variant as any).unitID);
-      unit = variantUnit?.shortName || "pcs";
-    } else {
-      const available = product.stock - (product.reservedStock || 0);
-      if (available < item.quantity)
-        throw new Error(`Insufficient stock for: ${product.name}`);
+      } else {
+        // single product
+        await Product.findByIdAndUpdate(
+          orderItem.productID,
+          {
+            $inc: {
+              stock: orderItem.quantity, // ✅ শুধু stock ফেরত
+              // reservedStock touch করবো না
+            },
+          },
+          { session },
+        );
+      }
+    }
+  }
+};
+
+
+// ===================== CREATE ORDER =====================
+const createOrderIntoDB = async (userID: string, payload: any) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const {
+      items, deliveryType, deliveryAddress, paymentMethod,
+      preferredDeliveryTime, couponCode, specialInstructions, isGift, giftNote,
+    } = payload;
+
+    if (!items || items.length === 0) {
+      throw new Error("Order must have at least one item!");
     }
 
-    const effectivePrice = salePrice || unitPrice;
-    const totalPrice = effectivePrice * item.quantity;
-    subtotal += totalPrice;
+    const orderItems: IOrderItem[] = [];
+    let subtotal = 0;
 
-    orderItems.push({
-      productID: product._id,
-      variantIndex: item.variantIndex,
-      productName: product.name,
-      thumbnail: product.thumbnail,
-      sku,
-      quantity: item.quantity,
-      unit,
-      weightOrVolume,
-      unitPrice,
-      salePrice,
-      totalPrice,
-    });
+    for (const item of items) {
+      const product = await Product.findById(item.productID)
+        .populate("unit")
+        .session(session);
+
+      if (!product) throw new Error(`Product not found: ${item.productID}`);
+      if (product.status !== "active") throw new Error(`Product unavailable: ${product.name}`);
+
+      let unitPrice = product.regularPrice;
+      let salePrice: number | undefined = product.salePrice;
+      let sku: string | undefined = product.sku;
+      let unit = (product.unit as any)?.shortName || "pcs";
+      let weightOrVolume: number | undefined = product.weightOrVolume;
+      let variantID: Types.ObjectId | null = null;
+
+      // ===== COMBO =====
+      if (product.productType === "combo") {
+        const available = product.stock - (product.reservedStock || 0);
+        if (available < item.quantity) {
+          throw new Error(`Insufficient stock for combo: ${product.name}`);
+        }
+        unitPrice = product.regularPrice;
+        salePrice = product.salePrice;
+
+      // ===== VARIANT =====
+      } else if (item.variantID && product.variants?.length) {
+        const vIdx = (product.variants ?? []).findIndex(
+          (v: any) => v._id?.toString() === item.variantID?.toString(),
+        );
+
+        if (vIdx === -1) throw new Error(`Variant not found for: ${product.name}`);
+
+        const variant = product.variants[vIdx] as any;
+        const available = variant.stock - (product.reservedStock || 0);
+
+        if (available < item.quantity) {
+          throw new Error(`Insufficient stock for variant of: ${product.name}`);
+        }
+
+        unitPrice = variant.regularPrice;
+        salePrice = variant.salePrice;
+        sku = variant.sku || product.sku;
+        weightOrVolume = variant.weightOrVolume;
+        variantID = variant._id as Types.ObjectId;
+
+        const variantUnit = await Unit.findById(variant.unitID).session(session);
+        unit = variantUnit?.shortName || "pcs";
+
+      // ===== SINGLE =====
+      } else {
+        const available = product.stock - (product.reservedStock || 0);
+        if (available < item.quantity) {
+          throw new Error(`Insufficient stock for: ${product.name}`);
+        }
+      }
+
+      const effectivePrice = salePrice && salePrice > 0 ? salePrice : unitPrice;
+      const totalPrice = effectivePrice * item.quantity;
+      subtotal += totalPrice;
+
+      orderItems.push({
+        productID: product._id as Types.ObjectId,
+        variantID,
+        productName: product.name,
+        thumbnail: product.thumbnail,
+        sku,
+        quantity: item.quantity,
+        unit,
+        weightOrVolume,
+        unitPrice,
+        salePrice,
+        totalPrice,
+        productType: product.productType,
+      } as IOrderItem);
+    }
+
+    const shippingCharge = calculateShipping(deliveryType, subtotal);
+    const couponDiscount = 0;
+    const totalAmount = subtotal - couponDiscount + shippingCharge;
+
+    const estimatedDelivery = new Date();
+    estimatedDelivery.setDate(
+      estimatedDelivery.getDate() + (deliveryType === "local" ? 0 : 3),
+    );
+
+    const pendingExpiresAt = new Date();
+    pendingExpiresAt.setMinutes(pendingExpiresAt.getMinutes() + 30);
+
+    const orderData: Partial<IOrder> = {
+      userID: userID as any,
+      items: orderItems,
+      subtotal,
+      discountAmount: couponDiscount,
+      couponCode,
+      couponDiscount,
+      shippingCharge,
+      totalAmount,
+      deliveryType,
+      deliveryAddress,
+      preferredDeliveryTime,
+      estimatedDelivery,
+      pendingExpiresAt,
+      paymentMethod,
+      paymentStatus: "unpaid",
+      specialInstructions,
+      isGift,
+      giftNote,
+    };
+
+    const [order] = await Order.create([orderData], { session });
+
+    // ✅ শুধু reservedStock বাড়াও
+    for (const item of orderItems) {
+      await Product.findByIdAndUpdate(
+        item.productID,
+        { $inc: { reservedStock: item.quantity } },
+        { session },
+      );
+    }
+
+    await session.commitTransaction();
+    return order;
+
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
   }
-
-  const shippingCharge = calculateShipping(deliveryType, subtotal);
-  const couponDiscount = 0;
-  const discountAmount = couponDiscount;
-  const totalAmount = subtotal - discountAmount + shippingCharge;
-
-  const estimatedDays = deliveryType === "local" ? 0 : 3;
-  const estimatedDelivery = new Date();
-  estimatedDelivery.setDate(estimatedDelivery.getDate() + estimatedDays);
-
-  const pendingExpiresAt = new Date();
-  pendingExpiresAt.setMinutes(pendingExpiresAt.getMinutes() + 30);
-
-  const orderData: Partial<IOrder> = {
-    userID: userID as any,
-    items: orderItems,
-    subtotal,
-    discountAmount,
-    couponCode,
-    couponDiscount,
-    shippingCharge,
-    totalAmount,
-    deliveryType,
-    deliveryAddress,
-    preferredDeliveryTime,
-    estimatedDelivery,
-    pendingExpiresAt,
-    paymentMethod,
-    paymentStatus: "unpaid",
-    specialInstructions,
-    isGift,
-    giftNote,
-  };
-
-  const order = await Order.create(orderData);
-
-  // actual stock নয়, শুধু reservedStock বাড়াও
-  for (const item of items) {
-    await Product.findByIdAndUpdate(item.productID, {
-      $inc: { reservedStock: item.quantity },
-    });
-  }
-
-  return order;
 };
+
+
+// ===================== ADMIN STATUS UPDATE =====================
 const updateOrderStatusByAdmin = async (
   orderID: string,
   status: string,
   note: string,
   adminID: string,
 ) => {
-  const order = await Order.findById(orderID);
-  if (!order) throw new Error("Order not found!");
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  const prevStatus = order.status;
+  try {
+    const order = await Order.findById(orderID).session(session);
+    if (!order) throw new Error("Order not found!");
 
-  order.status = status as any;
-  order.statusTimeline.push({
-    status: status as any,
-    changedAt: new Date(),
-    note,
-    changedBy: adminID as any,
-  });
+    const prevStatus = order.status;
 
-  // pending/confirmed → confirmed: actual stock deduct + reserve মুক্ত
-  if (status === "confirmed" && prevStatus === "pending") {
-    for (const item of order.items) {
-      if (item.variantIndex !== undefined) {
-        await Product.findByIdAndUpdate(item.productID, {
-          $inc: {
-            [`variants.${item.variantIndex}.stock`]: -item.quantity, // actual কাটো
-            reservedStock: -item.quantity, // reserve মুক্ত
-          },
-        });
-      } else {
-        await Product.findByIdAndUpdate(item.productID, {
-          $inc: {
-            stock: -item.quantity, // actual কাটো
-            reservedStock: -item.quantity, // reserve মুক্ত
-          },
-        });
-      }
+    order.status = status as any;
+    order.statusTimeline.push({
+      status: status as any,
+      changedAt: new Date(),
+      note,
+      changedBy: adminID as any,
+    });
+
+    // pending → confirmed: actual stock কাটো
+    if (status === "confirmed" && prevStatus === "pending") {
+      await deductStockForItems(order.items as unknown as IOrderItem[], session);
     }
-  }
 
-  await order.save();
-  return order;
+    // cancelled: stock ফেরত
+    if (status === "cancelled") {
+      order.cancelledBy = "admin";
+      order.cancelReason = note;
+      await restoreStockForItems(order.items as unknown as IOrderItem[], prevStatus, session);
+    }
+
+    await order.save({ session });
+    await session.commitTransaction();
+    return order;
+
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
 };
 
-//  Cancel হলে reserve ফেরত দাও (actual stock অপরিবর্তিত)
+
+// ===================== USER CANCEL =====================
 const cancelOrderByUser = async (
   orderID: string,
   userID: string,
   reason: string,
 ) => {
-  const order = await Order.findOne({ _id: orderID, userID });
-  if (!order) throw new Error("Order not found!");
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  const cancellableStatuses = ["pending", "confirmed"];
-  if (!cancellableStatuses.includes(order.status)) {
-    throw new Error(`Cannot cancel order in '${order.status}' status`);
-  }
+  try {
+    const order = await Order.findOne({ _id: orderID, userID }).session(session);
+    if (!order) throw new Error("Order not found!");
 
-  const prevStatus = order.status; // 👈 আগে save করো, তারপর change করো
-
-  order.status = "cancelled";
-  order.cancelReason = reason;
-  order.cancelledBy = "user";
-  order.statusTimeline.push({
-    status: "cancelled",
-    changedAt: new Date(),
-    note: reason,
-  });
-
-  for (const item of order.items) {
-    if (prevStatus === "pending") {
-      // 👈 order.status এর বদলে prevStatus
-      await Product.findByIdAndUpdate(item.productID, {
-        $inc: { reservedStock: -item.quantity },
-      });
-    } else {
-      if (item.variantIndex !== undefined) {
-        await Product.findByIdAndUpdate(item.productID, {
-          $inc: {
-            [`variants.${item.variantIndex}.stock`]: item.quantity,
-            reservedStock: -item.quantity,
-          },
-        });
-      } else {
-        await Product.findByIdAndUpdate(item.productID, {
-          $inc: {
-            stock: item.quantity,
-            reservedStock: -item.quantity,
-          },
-        });
-      }
+    const cancellableStatuses = ["pending", "confirmed"];
+    if (!cancellableStatuses.includes(order.status)) {
+      throw new Error(`Cannot cancel order in '${order.status}' status`);
     }
-  }
 
-  await order.save();
-  return order;
+    const prevStatus = order.status;
+
+    order.status = "cancelled";
+    order.cancelReason = reason;
+    order.cancelledBy = "user";
+    order.statusTimeline.push({
+      status: "cancelled",
+      changedAt: new Date(),
+      note: reason,
+    });
+
+    await restoreStockForItems(order.items as unknown as IOrderItem[], prevStatus, session);
+
+    await order.save({ session });
+    await session.commitTransaction();
+    return order;
+
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
 };
 
+
+// ===================== AUTO EXPIRE =====================
+const autoExpireOrders = async () => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const expiredOrders = await Order.find({
+      status: "pending",
+      pendingExpiresAt: { $lte: new Date() },
+    }).session(session);
+
+    for (const order of expiredOrders) {
+      order.status = "cancelled";
+      order.cancelReason = "Auto cancelled - payment timeout";
+      order.cancelledBy = "admin";
+      order.statusTimeline.push({
+        status: "cancelled",
+        changedAt: new Date(),
+        note: "Auto cancelled after 30 minutes",
+      });
+
+      await restoreStockForItems(
+        order.items as unknown as IOrderItem[],
+        "pending",
+        session,
+      );
+
+      await order.save({ session });
+    }
+
+    await session.commitTransaction();
+    return expiredOrders.length;
+
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+};
+
+
+// ===================== QUERIES =====================
 const getMyOrdersFromDB = async (userID: string, query: any) => {
   const { page = 1, limit = 10, status } = query;
   const filter: any = { userID, ...(status && { status }) };
 
-  const orders = await Order.find(filter)
-    .sort({ createdAt: -1 })
-    .skip((page - 1) * limit)
-    .limit(Number(limit))
-    .select("-statusTimeline");
+  const [orders, total] = await Promise.all([
+    Order.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .select("-statusTimeline"),
+    Order.countDocuments(filter),
+  ]);
 
-  const total = await Order.countDocuments(filter);
   return { orders, total, page: Number(page), limit: Number(limit) };
 };
 
 const getSingleOrderFromDB = async (orderID: string, userID: string) => {
   const order = await Order.findOne({ _id: orderID, userID }).populate(
-    "items.productID",
-    "name thumbnail slug",
+    "items.productID", "name thumbnail slug",
   );
   if (!order) throw new Error("Order not found!");
   return order;
@@ -374,15 +476,18 @@ const getAllOrdersFromDB = async (query: any) => {
     if (to) filter.createdAt.$lte = new Date(to);
   }
 
-  const orders = await Order.find(filter)
-    .sort({ createdAt: -1 })
-    .skip((page - 1) * limit)
-    .limit(Number(limit))
-    .populate("userID", "name phone email");
+  const [orders, total] = await Promise.all([
+    Order.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .populate("userID", "name phone email"),
+    Order.countDocuments(filter),
+  ]);
 
-  const total = await Order.countDocuments(filter);
   return { orders, total, page: Number(page), limit: Number(limit) };
 };
+
 
 export const OrderServices = {
   createOrderIntoDB,
@@ -391,4 +496,5 @@ export const OrderServices = {
   cancelOrderByUser,
   getAllOrdersFromDB,
   updateOrderStatusByAdmin,
+  autoExpireOrders,
 };

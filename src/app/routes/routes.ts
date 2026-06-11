@@ -13,6 +13,7 @@ import { PaymentRoutes } from "../modules/payment/payment.routes";
 import { ContactRoutes } from "../modules/email/email.route";
 import { UnitRoutes } from "../modules/unit/unit.route";
 import { BrandRoutes } from "../modules/brand/brand.route";
+import { OrderRoutes } from "../modules/order/order.route";
 
 const router = Router();
 
@@ -29,10 +30,10 @@ const moduleRoutes = [
     path: "/products",
     route: ProductRoutes,
   },
-  // {
-  //   path: "/order",
-  //   route: OrderRoutes,
-  // },
+  {
+    path: "/order",
+    route: OrderRoutes,
+  },
   {
     path: "/subscribers",
     route: SubscriberRoutes,

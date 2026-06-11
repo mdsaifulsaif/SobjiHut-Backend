@@ -4,7 +4,8 @@ import { IOrder, IOrderItem } from "./order.interface";
 const orderItemSchema = new Schema<IOrderItem>(
   {
     productID: { type: Schema.Types.ObjectId, ref: "Product", required: true },
-    variantIndex: { type: Number },
+    variantID: { type: Schema.Types.ObjectId, default: null },
+    productType: { type: String, default: "single" },
     productName: { type: String, required: true },
     thumbnail: { type: String, required: true },
     sku: { type: String },
