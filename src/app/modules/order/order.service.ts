@@ -247,9 +247,9 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
     estimatedDelivery.setDate(
       estimatedDelivery.getDate() + (deliveryType === "local" ? 0 : 3),
     );
-
+  //  auto order cancel korar 
     const pendingExpiresAt = new Date();
-    pendingExpiresAt.setMinutes(pendingExpiresAt.getMinutes() + 30);
+    pendingExpiresAt.setMinutes(pendingExpiresAt.getMinutes() + 5);
 
     const orderData: Partial<IOrder> = {
       userID: userID as any,
@@ -386,33 +386,94 @@ const cancelOrderByUser = async (
 };
 
 // ===================== AUTO EXPIRE =====================
+// const autoExpireOrders = async () => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     const expiredOrders = await Order.find({
+//       status: "pending",
+//       pendingExpiresAt: { $lte: new Date() },
+//     }).session(session);
+
+//     for (const order of expiredOrders) {
+//       order.status = "cancelled";
+//       order.cancelReason = "Auto cancelled - payment timeout";
+//       order.cancelledBy = "admin";
+//       order.statusTimeline.push({
+//         status: "cancelled",
+//         changedAt: new Date(),
+//         note: "Auto cancelled after 30 minutes",
+//       });
+
+//       await restoreStockForItems(
+//         order.items as unknown as IOrderItem[],
+//         "pending",
+//         session,
+//       );
+
+//       await order.save({ session });
+//     }
+
+//     await session.commitTransaction();
+//     return expiredOrders.length;
+
+//   } catch (error) {
+//     await session.abortTransaction();
+//     throw error;
+//   } finally {
+//     session.endSession();
+//   }
+// };
+
 const autoExpireOrders = async () => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
+   
+    const now = new Date();
+    
+   
+    console.log(`[Expiry Job] Checking for orders expired before: ${now.toISOString()}`);
+
+  
     const expiredOrders = await Order.find({
       status: "pending",
-      pendingExpiresAt: { $lte: new Date() },
+      pendingExpiresAt: { $lte: now },
     }).session(session);
 
+ 
+    if (expiredOrders.length === 0) {
+      console.log("[Expiry Job] No expired orders found.");
+      await session.commitTransaction();
+      return 0;
+    }
+
+    console.log(`[Expiry Job] Found ${expiredOrders.length} orders to cancel.`);
+
     for (const order of expiredOrders) {
+     
       order.status = "cancelled";
       order.cancelReason = "Auto cancelled - payment timeout";
       order.cancelledBy = "admin";
+      
       order.statusTimeline.push({
         status: "cancelled",
         changedAt: new Date(),
         note: "Auto cancelled after 30 minutes",
       });
 
+    
       await restoreStockForItems(
         order.items as unknown as IOrderItem[],
         "pending",
         session,
       );
 
+ 
       await order.save({ session });
+      console.log(`[Expiry Job] Order ${order.orderNumber} has been cancelled.`);
     }
 
     await session.commitTransaction();
@@ -420,6 +481,7 @@ const autoExpireOrders = async () => {
 
   } catch (error) {
     await session.abortTransaction();
+    console.error("[Expiry Job] Error occurred:", error);
     throw error;
   } finally {
     session.endSession();
