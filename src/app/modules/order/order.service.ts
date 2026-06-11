@@ -6,6 +6,7 @@ import { IOrder, IOrderItem } from "./order.interface";
 import { Unit } from "../unit/unit.model";
 
 // ===================== HELPER: Stock Deduct =====================
+
 const deductStockForItems = async (
   items: IOrderItem[],
   session: mongoose.ClientSession,
@@ -14,51 +15,43 @@ const deductStockForItems = async (
     const orderItem = item as any;
 
     if (orderItem.productType === "combo") {
-      // combo main stock কাটো
+      // ১. কম্বো প্রোডাক্টের নিজের স্টক কমানো
       await Product.findByIdAndUpdate(
         orderItem.productID,
         { $inc: { stock: -orderItem.quantity, reservedStock: -orderItem.quantity } },
-        { session },
+        { session }
       );
 
-      // combo inner products stock কাটো
+      // ২. কম্বোর ভেতরকার আইটেমগুলোর স্টক আপডেট করা
       const comboProduct = await Product.findById(orderItem.productID).session(session);
-      if (!comboProduct) continue;
+      if (!comboProduct?.comboItems) continue;
 
-      for (const comboItem of (comboProduct.comboItems as any[])) {
-        const requiredQty = comboItem.quantity * orderItem.quantity;
+      for (const comboItem of comboProduct.comboItems) {
+        const totalRequired = (comboItem.quantity || 1) * orderItem.quantity;
 
         if (comboItem.selectedVariant) {
-          const innerProduct = await Product.findById(comboItem.productID).session(session);
-          if (!innerProduct) continue;
-
-          const vIdx = (innerProduct.variants ?? []).findIndex(
-            (v: any) => v._id?.toString() === comboItem.selectedVariant?.toString(),
+          // যদি ভ্যারিয়েন্ট হয়
+          await Product.findOneAndUpdate(
+            { _id: comboItem.productID, "variants._id": comboItem.selectedVariant },
+            { 
+              $inc: { 
+                "variants.$.stock": -totalRequired, // ভ্যারিয়েন্ট স্টক
+                stock: -totalRequired              // মেইন প্রোডাক্টের টোটাল স্টক
+              } 
+            },
+            { session }
           );
-
-          if (vIdx !== -1) {
-            await Product.findByIdAndUpdate(
-              comboItem.productID,
-              {
-                $inc: {
-                  [`variants.${vIdx}.stock`]: -requiredQty,
-                  stock: -requiredQty,
-                },
-              },
-              { session },
-            );
-          }
         } else {
+          // যদি সিঙ্গেল প্রোডাক্ট হয়
           await Product.findByIdAndUpdate(
             comboItem.productID,
-            { $inc: { stock: -requiredQty } },
-            { session },
+            { $inc: { stock: -totalRequired } },
+            { session }
           );
         }
       }
-
     } else if (orderItem.variantID) {
-      // variant product
+      //  VARIANT
       const product = await Product.findById(orderItem.productID).session(session);
       if (!product) continue;
 
@@ -71,20 +64,24 @@ const deductStockForItems = async (
           orderItem.productID,
           {
             $inc: {
-              [`variants.${vIdx}.stock`]: -orderItem.quantity,
-              stock: -orderItem.quantity,
-              reservedStock: -orderItem.quantity,
+              [`variants.${vIdx}.stock`]: -orderItem.quantity, // variant stock কাটো
+              stock: -orderItem.quantity,                       // main stock কাটো
+              reservedStock: -orderItem.quantity,               // reserve মুক্ত
             },
           },
           { session },
         );
       }
-
     } else {
-      // single product
+      // ✅ SINGLE
       await Product.findByIdAndUpdate(
         orderItem.productID,
-        { $inc: { stock: -orderItem.quantity, reservedStock: -orderItem.quantity } },
+        {
+          $inc: {
+            stock: -orderItem.quantity,
+            reservedStock: -orderItem.quantity,
+          },
+        },
         { session },
       );
     }
@@ -92,6 +89,7 @@ const deductStockForItems = async (
 };
 
 // ===================== HELPER: Stock Restore =====================
+
 const restoreStockForItems = async (
   items: IOrderItem[],
   prevStatus: string,
@@ -100,61 +98,54 @@ const restoreStockForItems = async (
   for (const item of items) {
     const orderItem = item as any;
 
-    if (prevStatus === "pending") {
-      // ✅ pending এ শুধু reservedStock ফেরত
-      // stock: 40, reserved: 2 → stock: 40, reserved: 0
-      await Product.findByIdAndUpdate(
-        orderItem.productID,
-        { $inc: { reservedStock: -orderItem.quantity } },
-        { session },
-      );
+    if (orderItem.productType === "combo") {
+      const comboProduct = await Product.findById(orderItem.productID).session(session);
+      if (!comboProduct?.comboItems) continue;
 
-    } else if (prevStatus === "confirmed") {
-      // ✅ confirmed এ শুধু stock ফেরত — reservedStock touch করবো না
-      // কারণ confirm হওয়ার সময় reservedStock already 0 হয়ে গেছে
-      // stock: 38, reserved: 0 → stock: 40, reserved: 0
+      // কম্বো মেইন প্রোডাক্টের ক্ষেত্রে
+      if (prevStatus === "pending") {
+        await Product.findByIdAndUpdate(orderItem.productID, { $inc: { reservedStock: -orderItem.quantity } }, { session });
+      } else if (prevStatus === "confirmed") {
+        await Product.findByIdAndUpdate(orderItem.productID, { $inc: { stock: orderItem.quantity } }, { session });
+      }
 
-      if (orderItem.variantID) {
-        const product = await Product.findById(orderItem.productID).session(session);
-        if (!product) continue;
-
-        const vIdx = (product.variants ?? []).findIndex(
-          (v: any) => v._id?.toString() === orderItem.variantID?.toString(),
-        );
-
-        if (vIdx !== -1) {
-          await Product.findByIdAndUpdate(
-            orderItem.productID,
-            {
-              $inc: {
-                [`variants.${vIdx}.stock`]: orderItem.quantity, // ✅ variant stock ফেরত
-                stock: orderItem.quantity,                       // ✅ main stock ফেরত
-                // reservedStock touch করবো না
-              },
-            },
-            { session },
+      // কম্বো ভেতরের আইটেম
+      for (const comboItem of comboProduct.comboItems) {
+        const reverseQty = (comboItem.quantity || 1) * orderItem.quantity;
+        if (comboItem.selectedVariant) {
+          await Product.findOneAndUpdate(
+            { _id: comboItem.productID, "variants._id": comboItem.selectedVariant },
+            { $inc: { "variants.$.stock": reverseQty, stock: reverseQty } },
+            { session }
           );
+        } else {
+          await Product.findByIdAndUpdate(comboItem.productID, { $inc: { stock: reverseQty } }, { session });
         }
+      }
 
-      } else {
-        // single product
-        await Product.findByIdAndUpdate(
-          orderItem.productID,
-          {
-            $inc: {
-              stock: orderItem.quantity, // ✅ শুধু stock ফেরত
-              // reservedStock touch করবো না
-            },
-          },
-          { session },
+    } else if (orderItem.variantID) {
+      if (prevStatus === "pending") {
+        await Product.findByIdAndUpdate(orderItem.productID, { $inc: { reservedStock: -orderItem.quantity } }, { session });
+      } else if (prevStatus === "confirmed") {
+        await Product.findOneAndUpdate(
+          { _id: orderItem.productID, "variants._id": orderItem.variantID },
+          { $inc: { "variants.$.stock": orderItem.quantity, stock: orderItem.quantity } },
+          { session }
         );
+      }
+    } else {
+      // Single Product
+      if (prevStatus === "pending") {
+        await Product.findByIdAndUpdate(orderItem.productID, { $inc: { reservedStock: -orderItem.quantity } }, { session });
+      } else if (prevStatus === "confirmed") {
+        await Product.findByIdAndUpdate(orderItem.productID, { $inc: { stock: orderItem.quantity } }, { session });
       }
     }
   }
 };
 
-
 // ===================== CREATE ORDER =====================
+
 const createOrderIntoDB = async (userID: string, payload: any) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -303,7 +294,6 @@ const createOrderIntoDB = async (userID: string, payload: any) => {
   }
 };
 
-
 // ===================== ADMIN STATUS UPDATE =====================
 const updateOrderStatusByAdmin = async (
   orderID: string,
@@ -352,7 +342,6 @@ const updateOrderStatusByAdmin = async (
   }
 };
 
-
 // ===================== USER CANCEL =====================
 const cancelOrderByUser = async (
   orderID: string,
@@ -396,7 +385,6 @@ const cancelOrderByUser = async (
   }
 };
 
-
 // ===================== AUTO EXPIRE =====================
 const autoExpireOrders = async () => {
   const session = await mongoose.startSession();
@@ -437,7 +425,6 @@ const autoExpireOrders = async () => {
     session.endSession();
   }
 };
-
 
 // ===================== QUERIES =====================
 const getMyOrdersFromDB = async (userID: string, query: any) => {
